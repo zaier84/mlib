@@ -1,0 +1,120 @@
+#-----------------------------------------------------------------------------
+# Build artifacts (CMake and others)
+#-----------------------------------------------------------------------------
+build/
+build-*/          # E.g., build-debug, build-release
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CMakeDoxyfile.in
+CMakeDoxyfile.stamp
+CTestTestfile.cmake
+compile_commands.json
+Makefile          # If using Makefiles directly without CMake out-of-source builds
+*.make
+*.ninja
+*.obj
+*.o
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+*.pch             # Precompiled headers
+
+#-----------------------------------------------------------------------------
+# IDE-specific files
+#-----------------------------------------------------------------------------
+
+# Visual Studio Code
+.vscode/
+
+# CLion
+.idea/
+
+# Visual Studio
+*.sln
+*.suo
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.ncb
+*.APS
+*.opensdf
+*.sdf
+ipch/
+obj/
+Debug/
+debug/
+Release/
+release/
+Win32/
+x64/
+ARM/
+ARM64/
+packages/
+*.[Bb]in
+*.[Ll]og
+*.[Tt]est
+
+# Qt Creator
+*.pro.user
+*.pro.user.*
+*.qbs.user
+*.qbs.user.*
+
+# Eclipse CDT
+.cproject
+.project
+.settings/
+*~
+*#
+.#*
+.DS_Store       # macOS
+
+#-----------------------------------------------------------------------------
+# Documentation artifacts (e.g., Doxygen)
+#-----------------------------------------------------------------------------
+Doxyfile.bak
+docs/html/      # If Doxygen output is in docs/html
+docs/latex/
+docs/man/
+docs/rtf/
+docs/xml/
+
+#-----------------------------------------------------------------------------
+# Testing related (e.g., coverage reports)
+#-----------------------------------------------------------------------------
+*.gcno
+*.gcda
+*.gcov
+coverage/
+lcov_output/
+
+#-----------------------------------------------------------------------------
+# Dependency managers (if you use them locally)
+#-----------------------------------------------------------------------------
+# Example: Conan
+conanbuildinfo.cmake
+conanbuildinfo.txt
+conaninfo.txt
+graph_info.json
+conan.lock
+
+# Example: vcpkg
+vcpkg_installed/
+
+#-----------------------------------------------------------------------------
+# Other common files to ignore
+#-----------------------------------------------------------------------------
+tags            # ctags or etags
+cscope.out
+cscope.files
+# If you have any local configuration files not meant for the repo
+# local_config.ini
+
+# If you use any specific logging files during development
+# my_dev_log.txt

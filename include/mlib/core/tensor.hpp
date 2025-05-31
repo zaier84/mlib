@@ -243,7 +243,7 @@ Tensor<T>::Tensor(const shape_type &shape, T fill_value) : _shape(shape)
 {
 	// Calculate total size (same logic as shape-only constructor)
     if (shape.empty())
-        _total_size = 0;
+        _total_size = 1;
     else
     {
         _total_size = 1;
@@ -403,30 +403,36 @@ template <typename T>
 template <typename... OperatorArgs>
 T &Tensor<T>::operator()(OperatorArgs... args)
 {
-	// Compile-time check: operator() without args is only for scalars.
-	static_assert(sizeof...(OperatorArgs) > 0 || this->ndim() == 0,
-                "operator() requires at least one index for non-scalar tensors.");
 	// Compile-time check: all arguments must be integral.
 	static_assert((std::is_integral_v<OperatorArgs> && ...),
                 "All indices for operator() must be integral types.");
+	
+	if constexpr (sizeof...(OperatorArgs) == 0)
+	{
+		if(!is_scalar())
+			throw std::out_of_range("operator() with no arguments is only for scalar tensors.");
 
-    if (this->ndim() > 0 && sizeof...(OperatorArgs) != _shape.size())
-    {
-        throw std::out_of_range("Number of indices in operator() does not "
-                                "match tensor dimensions.");
-    }
-    if (this->ndim() == 0)
-    {
-        if constexpr (sizeof...(OperatorArgs) == 0)
-        {
-            if (_data.empty())
-                throw std::runtime_error("Accessing empty scalar tensor.");
-            return _data[0];
-        }
-        else
-            throw std::out_of_range("Indices provided for a scalar tensor.");
-    }
-    return _data[calculate_flat_index_variadic(0, 0, args...)];
+		return _data[0];
+	}
+	else
+	{
+		// This block is compiled only if one or more arguments are passed.
+		if (is_scalar()) { // Runtime check
+			throw std::out_of_range("Indices provided for a scalar tensor.");
+		}
+		if (is_empty()){ // Runtime check for non-scalar empty tensors (e.g. {0,2})
+			throw std::out_of_range("Cannot access elements in an empty (non-scalar) tensor via operator().");
+		}
+	
+		if (sizeof...(OperatorArgs) != _shape.size())
+		{
+			throw std::out_of_range(
+				"Number of indices (" + std::to_string(sizeof...(OperatorArgs)) +
+				") in operator() does not match tensor dimensions (" +
+				std::to_string(_shape.size()) + ").");
+		}
+		return _data[calculate_flat_index_variadic(0, 0, args...)];
+	}
 }
 
 // 11. VARIADIC ELEMENT ACCESS (CONST)
@@ -434,30 +440,36 @@ template <typename T>
 template <typename... OperatorArgs>
 const T &Tensor<T>::operator()(OperatorArgs... args) const
 {
-	// Compile-time check: operator() without args is only for scalars.
-	static_assert(sizeof...(OperatorArgs) > 0 || this->ndim() == 0,
-                "operator() requires at least one index for non-scalar tensors.");
 	// Compile-time check: all arguments must be integral.
 	static_assert((std::is_integral_v<OperatorArgs> && ...),
                 "All indices for operator() must be integral types.");
+	
+	if constexpr (sizeof...(OperatorArgs) == 0)
+	{
+		if(!is_scalar())
+			throw std::out_of_range("operator() with no arguments is only for scalar tensors.");
 
-    if (this->ndim() > 0 && sizeof...(OperatorArgs) != _shape.size())
-    {
-        throw std::out_of_range("Number of indices in operator() does not "
-                                "match tensor dimensions.");
-    }
-    if (this->ndim() == 0)
-    {
-        if constexpr (sizeof...(OperatorArgs) == 0)
-        {
-            if (_data.empty())
-                throw std::runtime_error("Accessing empty scalar tensor.");
-            return _data[0];
-        }
-        else
-            throw std::out_of_range("Indices provided for a scalar tensor.");
-    }
-    return _data[calculate_flat_index_variadic(0, 0, args...)];
+		return _data[0];
+	}
+	else
+	{
+		// This block is compiled only if one or more arguments are passed.
+		if (is_scalar()) { // Runtime check
+			throw std::out_of_range("Indices provided for a scalar tensor.");
+		}
+		if (is_empty()){ // Runtime check for non-scalar empty tensors (e.g. {0,2})
+			throw std::out_of_range("Cannot access elements in an empty (non-scalar) tensor via operator().");
+		}
+	
+		if (sizeof...(OperatorArgs) != _shape.size())
+		{
+			throw std::out_of_range(
+				"Number of indices (" + std::to_string(sizeof...(OperatorArgs)) +
+				") in operator() does not match tensor dimensions (" +
+				std::to_string(_shape.size()) + ").");
+		}
+		return _data[calculate_flat_index_variadic(0, 0, args...)];
+	}
 }
 
 // 12. RAW DATA ACCESS (NON-CONST)

@@ -1,12 +1,14 @@
 #ifndef MLIB_CORE_TENSOR_HPP
 #define MLIB_CORE_TENSOR_HPP
 
-#include <vector>
+#include <algorithm>
+#include <iostream>
+#include <memory>
 #include <numeric>
 #include <stdexcept>
-#include <iostream>
-#include <algorithm>
-#include <memory>
+#include <string>
+#include <type_traits>
+#include <vector>
 
 namespace mlib
 {
@@ -17,470 +19,559 @@ template <typename T>
 class Tensor
 {
 public:
-	using value_type = T;
-	using shape_type = std::vector<size_t>;
-	using strides_type = std::vector<size_t>;
-	using data_type = std::vector<T>;
+    using value_type = T;
+    using shape_type = std::vector<size_t>;
+    using strides_type = std::vector<size_t>;
+    using data_type = std::vector<T>;
 
-	// Constructors and Destructor
-	Tensor();
-	explicit Tensor(const shape_type& shape);
-	Tensor(const shape_type& shape, const data_type& data);
-	Tensor(const shape_type& shape, T fill_value);
+    // Constructors and Destructor
+    Tensor();
+    explicit Tensor(const shape_type &shape);
+    Tensor(const shape_type &shape, const data_type &data);
+    Tensor(const shape_type &shape, T fill_value);
 
-	// Copy semantics
-	Tensor(const Tensor& other);
-	Tensor& operator=(const Tensor& other);
+    // Copy semantics
+    Tensor(const Tensor &other);
+    Tensor &operator=(const Tensor &other);
 
-	// Move semactics
-	Tensor(Tensor&& other) noexcept;
-	Tensor& operator=(Tensor&& other) noexcept;
+    // Move semactics
+    Tensor(Tensor &&other) noexcept;
+    Tensor &operator=(Tensor &&other) noexcept;
 
-	~Tensor() = default;
+    ~Tensor() = default;
 
-	// Accessors
-	const shape_type& get_shape() const;
-	const strides_type& get_strides() const;
-	size_t ndim() const;
-	size_t get_total_size() const;
-	bool is_empty() const;
-	bool is_contiguous() const;
+    // Accessors
+    const shape_type &get_shape() const;
+    const strides_type &get_strides() const;
+    size_t ndim() const;
+    size_t get_total_size() const;
+    bool is_empty() const;
+	bool is_scalar() const;
+    bool is_contiguous() const;
 
-	// Element access (const and non-const)
-	//
-	T& at(const std::vector<size_t>& indices);
-	const T& at(const std::vector<size_t>& indices) const;
+    // Element access (const and non-const)
+    //
+    T &at(const std::vector<size_t> &indices);
+    const T &at(const std::vector<size_t> &indices) const;
 
-	// Variadic template for convinent access like tensor(i, j, k)
-	//
-	template <typename... OperatorArgs>
-	T& operator()(OperatorArgs... args);
-	template <typename... OperatorArgs>
-	const T& operator()(OperatorArgs... args) const;
+    // Variadic template for convinent access like tensor(i, j, k)
+    //
+    template <typename... OperatorArgs> T &operator()(OperatorArgs... args);
+    template <typename... OperatorArgs>
+    const T &operator()(OperatorArgs... args) const;
 
-	// Direct data access
-	T* data();
-	const T* data() const;
+    // Direct data access
+    T *data();
+    const T *data() const;
 
-	// Modifiers
-	void fill(T value);
-	void reshape(const shape_type& new_shape);
+    // Modifiers
+    void fill(T value);
+    void reshape(const shape_type &new_shape);
 
-	// Utility
-	void print(std::ostream& os = std::cout) const;
+    // Utility
+    void print(std::ostream &os = std::cout) const;
 
 private:
-	data_type _data;
-	shape_type _shape;
-	strides_type _strides;
-	size_t _total_size = 0;
+    data_type _data;
+    shape_type _shape;
+    strides_type _strides;
+    size_t _total_size = 0;
 
-	// Private Helper Functions
-	void calculate_strides();
-	size_t calculate_flat_index(const std::vector<size_t>& indices) const;
-	
-	template <typename IndexType, typename... RestIndices>
-	size_t calculate_flat_index_variadic(size_t current_dim_idx, size_t accumulated_offset, IndexType current_index, RestIndices... rest_indices) const;
+    // Private Helper Functions
+    void calculate_strides();
+    size_t calculate_flat_index(const std::vector<size_t> &indices) const;
 
-	size_t calculate_flat_index_variadic(size_t current_dim_idx, size_t accumulated) const;
-	
+    template <typename IndexType, typename... RestIndices>
+    size_t calculate_flat_index_variadic(size_t current_dim_idx,
+                                         size_t accumulated_offset,
+                                         IndexType current_index,
+                                         RestIndices... rest_indices) const;
+
+    size_t calculate_flat_index_variadic(size_t current_dim_idx,
+                                         size_t accumulated) const;
 };
 
 template <typename T>
 void Tensor<T>::calculate_strides()
 {
-	if(_shape.empty())
-	{
-		_strides.clear();
-		return;
-	}
-	_strides.resize(_shape.size());
-	_strides.back() = 1;
+    if (_shape.empty())
+    {
+        _strides.clear();
+        return;
+    }
+    _strides.resize(_shape.size());
+    _strides.back() = 1;
 
-	for(int i = static_cast<int>(_shape.size()) - 2; i >= 0; i--)
-	{
-		_strides[i] = _strides[i + 1] * _shape[i + 1];
-	}
+    for (int i = static_cast<int>(_shape.size()) - 2; i >= 0; i--)
+    {
+        _strides[i] = _strides[i + 1] * _shape[i + 1];
+    }
 }
 
 template <typename T>
-size_t Tensor<T>::calculate_flat_index(const std::vector<size_t>& indices) const
+size_t Tensor<T>::calculate_flat_index(const std::vector<size_t> &indices) const
 {
-	if (indices.size() != _shape.size())
-	{
-		throw std::out_of_range("Number of indices does not match tensor dimensions.");
-	}
-	size_t flat_index = 0;
-	for(size_t i = 0; i < _shape.size(); i++)
-	{
-		if (indices[i] >= _shape.size())
-		{
-			throw std::out_of_range("Index out of bound for dimension " + std::to_string(i));
-		}
-		flat_index += indices[i] * _strides[i];
-	}
-	return flat_index;
+    if (indices.size() != _shape.size())
+    {
+        throw std::out_of_range(
+            "Number of indices does not match tensor dimensions.");
+    }
+    size_t flat_index = 0;
+    for (size_t i = 0; i < _shape.size(); i++)
+    {
+        if (indices[i] >= _shape[i])
+        {
+            throw std::out_of_range("Index out of bound for dimension " +
+                                    std::to_string(i));
+        }
+        flat_index += indices[i] * _strides[i];
+    }
+    return flat_index;
 }
 
 // Variadic index calculation (base case for recursion)
+// Base case: No more indices to process (recursion termination)
 template <typename T>
 size_t Tensor<T>::calculate_flat_index_variadic(size_t current_dim_idx, size_t accumulated_offset) const
 {
-	if(current_dim_idx != _shape.size())
-	{
-		throw std::out_of_range("Too many indicies provided for tensor dimensions.");
-	}
-	return accumulated_offset;
+	// Check that we've processed exactly the right number of dimensions
+    if (current_dim_idx != _shape.size())
+        throw std::out_of_range("Too many indicies provided for tensor dimensions.");
+    return accumulated_offset;
 }
 
 // Variadic index calculation (recursive step)
-template<typename T>
-template<typename IndexType, typename... RestIndices>
-size_t Tensor<T>::calculate_flat_index_variadic(size_t current_dim_idx, size_t accumulated_offset, IndexType current_index, RestIndices... rest_indices) const
+// Recursive case: Process current index and recurse with remaining indices
+template <typename T>
+template <typename IndexType, typename... RestIndices>
+size_t Tensor<T>::calculate_flat_index_variadic(
+    size_t current_dim_idx,
+	size_t accumulated_offset,
+	IndexType current_index,
+    RestIndices... rest_indices) const
 {
-	if(current_dim_idx != _shape.size())
-	{
-		throw std::out_of_range("Too many indices provided for tensor dimension.");
-	}
-	if(static_cast<size_t>(current_index) >= _shape[current_dim_idx])
-	{
-		throw std::out_of_range("Index " + std::to_string(current_index) + " out of bound of dimension " + std::to_string(current_dim_idx) + " with size " + std::to_string(_shape[current_dim_idx]));
-	}
-	accumulated_offset += static_cast<size_t>(current_index) * _strides[current_dim_idx];
-	return calculate_flat_index_variadic(current_dim_idx + 1, accumulated_offset, rest_indices...);
+	// Check we haven't exceeded the number of dimensions
+    if (current_dim_idx >= _shape.size())
+        throw std::out_of_range("Too many indices provided for tensor dimension.");
+
+	// Bounds check for current index
+    if (static_cast<size_t>(current_index) >= _shape[current_dim_idx])
+    {
+        throw std::out_of_range(
+            "Index " + std::to_string(current_index) +
+            " out of bound of dimension " + std::to_string(current_dim_idx) +
+            " with size " + std::to_string(_shape[current_dim_idx]));
+    }
+
+	// Add current index contribution to accumulated offset
+    accumulated_offset += static_cast<size_t>(current_index) * _strides[current_dim_idx];
+
+	// Recurse with remaining indices
+    return calculate_flat_index_variadic(current_dim_idx + 1,
+                                         accumulated_offset, rest_indices...);
 }
 
 // Constructors & Destructor Implementations
+// 1. DEFAULT CONSTRUCTOR
 template <typename T>
 Tensor<T>::Tensor() : _total_size(0)
 {
-	// Empty tensor, _shape, _strides, _data are already empty std::vectors
+    // Empty tensor, _shape, _strides, _data are already empty std::vectors
+	// _total_size explicitly set to 0
 }
 
+// 2. SHAPE-ONLY CONSTRUCTOR
 template <typename T>
-Tensor<T>::Tensor(const shape_type& shape) : _shape(shape)
+Tensor<T>::Tensor(const shape_type &shape) : _shape(shape)
 {
-	if(_shape.empty())
-	{
-		_total_size = 0;
-	}
-	else
-	{
-		_total_size = 1;
-		for(size_t dim_size : _shape)
-		{
-			if(dim_size == 0)
-			{
-				_total_size = 0;
-				break;
-			}
-			_total_size *= dim_size;
-		}
-	}
-	_data.resize(_total_size, T{});
-	calculate_strides();
+	// Calculate total size from shape
+    if (_shape.empty())
+        _total_size = 0;
+    else
+    {
+        _total_size = 1;
+        for (size_t dim_size : _shape)
+        {
+            if (dim_size == 0)
+            {
+                _total_size = 0;
+                break;
+            }
+            _total_size *= dim_size;
+        }
+    }
+    _data.resize(_total_size, T{});
+    calculate_strides();
 }
 
+// 3. SHAPE + DATA CONSTRUCTOR
 template <typename T>
-Tensor<T>::Tensor(const shape_type& shape, const data_type& data) : _shape(shape)
+Tensor<T>::Tensor(const shape_type &shape, const data_type &data)
+    : _shape(shape)
 {
-	_total_size = 1;
-	if(shape.empty() && !data.empty() && data.size() == 1)
-	{
+	// Handle special case: scalar tensor (empty shape, single data element){}
+    if (shape.empty() && !data.empty() && data.size() == 1)
+        _total_size = 1;
+	// Handle empty tensor cases
+    else if (shape.empty() && (data.empty() || data.size() != 1))
+        _total_size = 0;
+	// Normal case: calculate size from shape
+    else
+    {
 		_total_size = 1;
-	}
-	else if(shape.empty() && (data.empty() || data.size() != 1))
-	{
-		_total_size = 0;
-	}
-	else
-	{
-		for(size_t dim_size : _shape)
-		{
-			if(dim_size = 0)
-			{
-				_total_size = 0;
-				break;
-			}
-			_total_size *= dim_size;
-		}
-	}
-	if(_total_size != data.size())
-	{
-		throw std::invalid_argument("Data size does not match shape dimensions.");
-	}
-	_data = data;
-	calculate_strides();
+        for (size_t dim_size : _shape)
+        {
+            if (dim_size == 0)
+            {
+                _total_size = 0;
+                break;
+            }
+            _total_size *= dim_size;
+        }
+    }
+	// Validate that data size matches calculated total size
+    if (_total_size != data.size())
+        throw std::invalid_argument("Data size does not match shape dimensions.");
+
+    _data = data;  // Copy the provided data
+    calculate_strides();
 }
 
+// 4. SHAPE + FILL VALUE CONSTRUCTOR
 template <typename T>
-Tensor<T>::Tensor(const shape_type& shape, T fill_value) : _shape(shape)
+Tensor<T>::Tensor(const shape_type &shape, T fill_value) : _shape(shape)
 {
-	if(shape.empty())
-	{
-		_total_size = 0;
-	}
-	else 
-	{
-		_total_size = 1;
-		for(size_t dim_size : _shape)
-		{
-			if(dim_size == 0)
-			{
-				_total_size = 0;
-				break;
-			}
-			_total_size *= dim_size;
-		}
-	}
-	_data.assign(_total_size, fill_value);
-	calculate_strides();
+	// Calculate total size (same logic as shape-only constructor)
+    if (shape.empty())
+        _total_size = 0;
+    else
+    {
+        _total_size = 1;
+        for (size_t dim_size : _shape)
+        {
+            if (dim_size == 0)
+            {
+                _total_size = 0;
+                break;
+            }
+            _total_size *= dim_size;
+        }
+    }
+
+	// Fill data with the specified value
+    _data.assign(_total_size, fill_value);
+    calculate_strides();
 }
 
 // Copy semantics
+// 5. COPY CONSTRUCTOR
 template <typename T>
-Tensor<T>::Tensor(const Tensor& other)
-	: _data(other._data),
-	  _shape(other._shape),
-	  _strides(other._strides),
-	  _total_size(other._total_size)
-{}
-
-template <typename T>
-Tensor<T>& Tensor<T>::operator=(const Tensor& other)
+Tensor<T>::Tensor(const Tensor &other)
+    : _data(other._data), _shape(other._shape), _strides(other._strides),
+      _total_size(other._total_size)
 {
-	if(this != &other)
-	{
-		_data = other._data;
-		_shape = other._shape;
-		_strides = other._strides;
-		_total_size = other._total_size;
-	}
-	return *this;
+	// Deep copy all member variables
+    // No additional work needed - member initializer list handles everything
+}
+
+// 6. COPY ASSIGNMENT OPERATOR
+template <typename T> Tensor<T> &Tensor<T>::operator=(const Tensor &other)
+{
+    if (this != &other)  // Self-assignment check
+    {
+        _data = other._data;
+        _shape = other._shape;
+        _strides = other._strides;
+        _total_size = other._total_size;
+    }
+    return *this;
 }
 
 // Move semantics
+// 7. MOVE CONSTRUCTOR
 template <typename T>
-Tensor<T>::Tensor(Tensor&& other) noexcept
-	: _data(std::move(other._data)),
+Tensor<T>::Tensor(Tensor &&other) noexcept
+    : _data(std::move(other._data)),
 	  _shape(std::move(other._shape)),
-	  _strides(std::move(other._strides)),
-	  _total_size(std::move(other._total_size))
+      _strides(std::move(other._strides)),
+      _total_size(std::move(other._total_size))
 {
-	other._total_size = 0;
+	other._shape.clear();
+	other._strides.clear();
+    other._total_size = 0;  // Leave other in valid state
 }
 
+// 8. MOVE ASSIGNMENT OPERATOR
 template <typename T>
-Tensor<T>& Tensor<T>::operator=(Tensor&& other) noexcept
+Tensor<T> &Tensor<T>::operator=(Tensor &&other) noexcept
 {
-	if(this != &other)
-	{
-		_data = std::move(other._data),
-		_shape = std::move(other._shape),
-		_strides = std::move(other._strides),
-		_total_size = std::move(other._total_size),
-		other._total_size = 0;
-	}
-	return *this;
+    if (this != &other)  // Self-assignment check
+    {
+        _data = std::move(other._data);
+		_shape = std::move(other._shape);
+        _strides = std::move(other._strides);
+        _total_size = std::move(other._total_size);
+
+		other._shape.clear();
+		other._strides.clear();
+		other._total_size = 0;  // Leave other in valid state
+    }
+    return *this;
 }
 
 // Accessor Implementation
+// 1. SHAPE ACCESSOR
 template <typename T>
-const typename Tensor<T>::shape_type& Tensor<T>::get_shape() const { return _shape; }
+const typename Tensor<T>::shape_type &Tensor<T>::get_shape() const { return _shape; }
 
+// 2. STRIDES ACCESSOR
 template <typename T>
-const typename Tensor<T>::strides_type& Tensor<T>::get_strides() const { return _strides; }
+const typename Tensor<T>::strides_type &Tensor<T>::get_strides() const { return _strides; }
 
+// 3. NUMBER OF DIMENSIONS
 template <typename T>
 size_t Tensor<T>::ndim() const { return _shape.size(); }
 
+// 4. TOTAL SIZE ACCESSOR
 template <typename T>
 size_t Tensor<T>::get_total_size() const { return _total_size; }
 
+// 5. EMPTY CHECK
 template <typename T>
-bool Tensor<T>::is_empty() const { return _total_size == 0 && _data.empty(); }
+bool Tensor<T>::is_empty() const
+{
+    return _total_size == 0 && _data.empty();
+}
 
+// 6. SCALAR CHECK
+template <typename T>
+bool Tensor<T>::is_scalar() const
+{
+	return _shape.empty() && _total_size == 1;
+}
+
+// 7. CONTIGUITY CHECK
 template <typename T>
 bool Tensor<T>::is_contiguous() const
 {
-	if(is_empty()) return true;
+    if (is_empty() && !is_scalar())
+        return true;  // Empty tensors are considered contiguous
 
-	if(_shape.empty()) return true;
-	strides_type expected_strides(_shape.size());
-	expected_strides.back() = 1;
-	for(int i = static_cast<int>(_shape.size()) - 2; i >= 0; i--)
-	{
-		expected_strides[i] = expected_strides[i + 1] * _shape[i + 1];
-	}
-	return _strides == expected_strides;
+	if (is_scalar())
+		return true;  // A scalar is always contiguous
+
+    if (_shape.empty())
+        return true;  // Scalar tensors are contiguous
+	
+	// Calculate what strides would be for contiguous storage
+    strides_type expected_strides(_shape.size());
+	if (_shape.empty() || _total_size == 0) return true;
+
+    expected_strides.back() = 1;  // Rightmost stride is always 1
+    for (int i = static_cast<int>(_shape.size()) - 2; i >= 0; i--)
+    {
+        expected_strides[i] = expected_strides[i + 1] * _shape[i + 1];
+    }
+    return _strides == expected_strides;  // Compare actual vs expected strides
 }
 
-template <typename T>
-T& Tensor<T>::at(const std::vector<size_t>& indices)
+// 8. ELEMENT ACCESS WITH VECTOR INDICES (NON-CONST)
+template <typename T> T &Tensor<T>::at(const std::vector<size_t> &indices)
 {
-	return _data[calculate_flat_index(indices)];
+	if (is_empty())
+      throw std::out_of_range("Cannot access elements in an empty tensor.");
+	if (is_scalar())  // at() is not for scalars, use operator()()
+      throw std::out_of_range("Cannot use std::vector<size_t> indices for a scalar tensor. Use operator()().");
+	
+    return _data[calculate_flat_index(indices)];
 }
 
+// 9. ELEMENT ACCESS WITH VECTOR INDICES (CONST)
 template <typename T>
-const T& Tensor<T>::at(const std::vector<size_t>& indices) const
+const T &Tensor<T>::at(const std::vector<size_t> &indices) const
 {
-	return _data[calculate_flat_index(indices)];
+	if (is_empty())
+      throw std::out_of_range("Cannot access elements in an empty tensor.");
+	if (is_scalar())  // at() is not for scalars, use operator()()
+      throw std::out_of_range("Cannot use std::vector<size_t> indices for a scalar tensor. Use operator()().");
+	
+    return _data[calculate_flat_index(indices)];
 }
 
+// 10. VARIADIC ELEMENT ACCESS (NON-CONST)
 template <typename T>
 template <typename... OperatorArgs>
-T& Tensor<T>::operator()(OperatorArgs... args)
+T &Tensor<T>::operator()(OperatorArgs... args)
 {
-	static_assert(sizeof...(OperatorArgs) > 0 || this->ndim() == 0, "operator() requires at least one index for non-scalar tensors.");
-	if(this->ndim() > 0 && sizeof...(OperatorArgs) != _shape.size())
-	{
-		throw std::out_of_range("Number of indices in operator() does not match tensor dimensions.");
-	}
-	if(this->ndim() == 0)
-	{
-		if constexpr (sizeof...(OperatorArgs) == 0)
-		{
-			if(_data.empty()) throw std::runtime_error("Accessing empty scalar tensor.");
-			return _data[0];
-		}
-		else
-			throw std::out_of_range("Indices provided for a scalar tensor.");
-	}
-	return _data[calculate_flat_index_variadic(0, 0, args...)];
+	// Compile-time check: operator() without args is only for scalars.
+	static_assert(sizeof...(OperatorArgs) > 0 || this->ndim() == 0,
+                "operator() requires at least one index for non-scalar tensors.");
+	// Compile-time check: all arguments must be integral.
+	static_assert((std::is_integral_v<OperatorArgs> && ...),
+                "All indices for operator() must be integral types.");
+
+    if (this->ndim() > 0 && sizeof...(OperatorArgs) != _shape.size())
+    {
+        throw std::out_of_range("Number of indices in operator() does not "
+                                "match tensor dimensions.");
+    }
+    if (this->ndim() == 0)
+    {
+        if constexpr (sizeof...(OperatorArgs) == 0)
+        {
+            if (_data.empty())
+                throw std::runtime_error("Accessing empty scalar tensor.");
+            return _data[0];
+        }
+        else
+            throw std::out_of_range("Indices provided for a scalar tensor.");
+    }
+    return _data[calculate_flat_index_variadic(0, 0, args...)];
 }
 
+// 11. VARIADIC ELEMENT ACCESS (CONST)
 template <typename T>
 template <typename... OperatorArgs>
-const T& Tensor<T>::operator()(OperatorArgs... args) const
+const T &Tensor<T>::operator()(OperatorArgs... args) const
 {
-	static_assert(sizeof...(OperatorArgs) > 0 || this->ndim() == 0, "operator() requires at least one index for non-scalar tensors.");
-	if(this->ndim() > 0 && sizeof...(OperatorArgs) != _shape.size())
-	{
-		throw std::out_of_range("Number of indices in operator() does not match tensor dimensions.");
-	}
-	if(this->ndim() == 0)
-	{
-		if constexpr (sizeof...(OperatorArgs) == 0)
-		{
-			if(_data.empty()) throw std::runtime_error("Accessing empty scalar tensor.");
-			return _data[0];
-		}
-		else
-			throw std::out_of_range("Indices provided for a scalar tensor.");
-	}
-	return _data[calculate_flat_index_variadic(0, 0, args...)];
+	// Compile-time check: operator() without args is only for scalars.
+	static_assert(sizeof...(OperatorArgs) > 0 || this->ndim() == 0,
+                "operator() requires at least one index for non-scalar tensors.");
+	// Compile-time check: all arguments must be integral.
+	static_assert((std::is_integral_v<OperatorArgs> && ...),
+                "All indices for operator() must be integral types.");
+
+    if (this->ndim() > 0 && sizeof...(OperatorArgs) != _shape.size())
+    {
+        throw std::out_of_range("Number of indices in operator() does not "
+                                "match tensor dimensions.");
+    }
+    if (this->ndim() == 0)
+    {
+        if constexpr (sizeof...(OperatorArgs) == 0)
+        {
+            if (_data.empty())
+                throw std::runtime_error("Accessing empty scalar tensor.");
+            return _data[0];
+        }
+        else
+            throw std::out_of_range("Indices provided for a scalar tensor.");
+    }
+    return _data[calculate_flat_index_variadic(0, 0, args...)];
 }
 
+// 12. RAW DATA ACCESS (NON-CONST)
 template <typename T>
-T* Tensor<T>::data() { return _data.data(); }
+T *Tensor<T>::data() { return _data.data(); }
 
+// 13. RAW DATA ACCESS (CONST)
 template <typename T>
-const T* Tensor<T>::data() const { return _data.data(); }
+const T *Tensor<T>::data() const { return _data.data(); }
 
 // Modifier Implementations
-template <typename T>
-void Tensor<T>::fill(T value)
+// 1. FILL METHOD - Sets all elements to a single value
+template <typename T> void Tensor<T>::fill(T value)
 {
-	std::fill(_data.begin(), _data.end(), value);
+    std::fill(_data.begin(), _data.end(), value);
 }
 
-template <typename T>
-void Tensor<T>::reshape(const shape_type& new_shape)
+// 2. RESHAPE METHOD - Changes tensor dimensions while preserving data
+template <typename T> void Tensor<T>::reshape(const shape_type &new_shape)
 {
-	size_t new_total_size = 1;
-	if(new_shape.empty())
-	{
-		new_total_size = 0;
-		if(_total_size == 1 && new_shape.empty())
-		{}
-		else
-			new_total_size = 0;
+    size_t new_total_size = 1;
+    if (new_shape.empty())
+    {
+        new_total_size = 0;
+        if (_total_size == 1 && new_shape.empty())
+        {
+        }
+        else
+            new_total_size = 0;
+    }
+    else
+    {
+        for (size_t dim_size : new_shape)
+        {
+            if (dim_size == 0)
+            {
+                new_total_size = 0;
+                break;
+            }
+            new_total_size *= dim_size;
+        }
+    }
 
-	}
-	else
-	{
-		for(size_t dim_size : _shape)
-		{
-			if(dim_size == 0)
-			{
-				new_total_size = 0;
-				break;
-			}
-			new_total_size *= dim_size;
-		}
-	}
+    if (new_total_size != _total_size && !(_total_size == 1 && new_shape.empty() && new_total_size == 0))
+    {
+        if (new_shape.empty() && _total_size == 1)
+        {
+        }
+        else if (new_total_size != _total_size)
+            throw std::invalid_argument("New shape total size must match current total size of reshape.");
+    }
 
-	if(new_total_size != _total_size && !(_total_size == 1 && new_shape.empty() && new_total_size == 0))
-	{
-		if(new_shape.empty() && _total_size == 1)
-		{}
-		else if(new_total_size != _total_size)
-		{
-			throw std::invalid_argument("New shape total size must match current total size of reshape.");
-		}
-	}
-
-	_shape = new_shape;
-	calculate_strides();
+    _shape = new_shape;
+    calculate_strides();
 }
 
 // Utility Implementations
-template <typename T>
-void Tensor<T>::print(std::ostream& os) const
+template <typename T> void Tensor<T>::print(std::ostream &os) const
 {
-	os << "Tensor(shape: {";
-	for(size_t i = 0; i < _shape.size(); i++)
-	{
-		os << _shape[i] << (i == _shape.size() - 1 ? "" : ", ");
-	}
-	os << "}, strides: {";
-	for(size_t i = 0; i < _strides.size(); i++)
-	{
-		os << _strides[i] << (i == _strides.size() - 1 ? "" : ", ");
-	}
-	os << "}, data: [";
+    os << "Tensor(shape: {";
+    for (size_t i = 0; i < _shape.size(); i++)
+    {
+        os << _shape[i] << (i == _shape.size() - 1 ? "" : ", ");
+    }
+    os << "}, strides: {";
+    for (size_t i = 0; i < _strides.size(); i++)
+    {
+        os << _strides[i] << (i == _strides.size() - 1 ? "" : ", ");
+    }
+    os << "}, data: [";
 
-	if(is_empty())
-		os << "]";
-	else if(ndim() == 0)
-	{
-		if(!_data.empty()) os << _data[0];
-		os << "]";
-	}
-	else if(ndim() == 1)
-	{
-		for(size_t i = 0; i < _shape[0]; i++)
-			os << at({i}) << (i == _shape[0] -1 ? "" : ", ");
-		os << "]";
-	}
-	else if(ndim() == 2)
-	{
-		os << "\n";
-		for(size_t i = 0; i < _shape[0]; i++)
-		{
-			os << "  [";
-			for(size_t j = 0; j < _shape[1]; j++)
-				os << at({i, j}) << (j == _shape[1] - 1 ? "" : ", ");
-			os << "]\n";
-		}
-	}
-	else
-	{
-		size_t count = 0;
-		for(const auto& val : _data)
-		{
-			os << val << ", ";
-			count++;
-			if(count > 10 && _data.size() > 15)
-			{
-				os << "...";
-				break;
-			}
-		}
-		if(!_data.empty() && count <=10) os << "\b\b ";
-		os << "]";
-	}
-	os << ")\n";
+    if (is_empty())
+        os << "]";
+    else if (ndim() == 0)
+    {
+        if (!_data.empty())
+            os << _data[0];
+        os << "]";
+    }
+    else if (ndim() == 1)
+    {
+        for (size_t i = 0; i < _shape[0]; i++)
+            os << at({i}) << (i == _shape[0] - 1 ? "" : ", ");
+        os << "]";
+    }
+    else if (ndim() == 2)
+    {
+        os << "\n";
+        for (size_t i = 0; i < _shape[0]; i++)
+        {
+            os << "  [";
+            for (size_t j = 0; j < _shape[1]; j++)
+                os << at({i, j}) << (j == _shape[1] - 1 ? "" : ", ");
+            os << "]\n";
+        }
+    }
+    else
+    {
+        size_t count = 0;
+        for (const auto &val : _data)
+        {
+            os << val << ", ";
+            count++;
+            if (count > 10 && _data.size() > 15)
+            {
+                os << "...";
+                break;
+            }
+        }
+        if (!_data.empty() && count <= 10)
+            os << "\b\b ";
+        os << "]";
+    }
+    os << ")\n";
 }
 
 } // namespace core

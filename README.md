@@ -40,7 +40,7 @@ mlib is in its early stages of development. Currently, it features:
 **Building (Example for a Unix-like environment):**
 ```bash
 # Clone the repository
-git clone <your-repository-url> mlib
+git clone https://github.com/zaier84/mlib.git mlib
 cd mlib
 
 # Configure the build

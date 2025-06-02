@@ -50,15 +50,16 @@ public:
     bool is_contiguous() const;
 
     // Element access (const and non-const)
-    //
-    T &at(const std::vector<size_t> &indices);
-    const T &at(const std::vector<size_t> &indices) const;
+    auto at(const std::vector<size_t> &indices) -> std::conditional_t<std::is_same_v<T, bool>, bool, T&>;
+	auto at(const std::vector<size_t> &indices) const -> std::conditional_t<std::is_same_v<T, bool>, bool, const T&>;
 
     // Variadic template for convinent access like tensor(i, j, k)
-    //
-    template <typename... OperatorArgs> T &operator()(OperatorArgs... args);
     template <typename... OperatorArgs>
-    const T &operator()(OperatorArgs... args) const;
+	// T &operator()(OperatorArgs... args);
+	auto operator()(OperatorArgs... args) -> std::conditional_t<std::is_same_v<T, bool>, bool, T&>;
+    template <typename... OperatorArgs>
+    // const T &operator()(OperatorArgs... args) const;
+	auto operator()(OperatorArgs... args) const -> std::conditional_t<std::is_same_v<T, bool>, bool, const T&>;
 
     // Direct data access
     T *data();
@@ -376,32 +377,44 @@ bool Tensor<T>::is_contiguous() const
 }
 
 // 8. ELEMENT ACCESS WITH VECTOR INDICES (NON-CONST)
-template <typename T> T &Tensor<T>::at(const std::vector<size_t> &indices)
+template <typename T>
+// T &Tensor<T>::at(const std::vector<size_t> &indices)
+auto Tensor<T>::at(const std::vector<size_t> &indices) -> std::conditional_t<std::is_same_v<T, bool>, bool, T&>
 {
 	if (is_empty())
       throw std::out_of_range("Cannot access elements in an empty tensor.");
 	if (is_scalar())  // at() is not for scalars, use operator()()
       throw std::out_of_range("Cannot use std::vector<size_t> indices for a scalar tensor. Use operator()().");
 	
-    return _data[calculate_flat_index(indices)];
+	size_t flat_idx = calculate_flat_index(indices);
+	if constexpr (std::is_same_v<T, bool>)
+		return static_cast<bool>(_data[flat_idx]); // Return by value
+	else
+		return _data[flat_idx]; // Return by reference
 }
 
 // 9. ELEMENT ACCESS WITH VECTOR INDICES (CONST)
 template <typename T>
-const T &Tensor<T>::at(const std::vector<size_t> &indices) const
+// const T &Tensor<T>::at(const std::vector<size_t> &indices) const
+auto Tensor<T>::at(const std::vector<size_t> &indices) const -> std::conditional_t<std::is_same_v<T, bool>, bool, const T&>
 {
 	if (is_empty())
       throw std::out_of_range("Cannot access elements in an empty tensor.");
 	if (is_scalar())  // at() is not for scalars, use operator()()
       throw std::out_of_range("Cannot use std::vector<size_t> indices for a scalar tensor. Use operator()().");
 	
-    return _data[calculate_flat_index(indices)];
+	size_t flat_idx = calculate_flat_index(indices);
+	if constexpr (std::is_same_v<T, bool>)
+		return static_cast<bool>(_data[flat_idx]); // Return by value
+	else
+		return _data[flat_idx]; // Return by reference
 }
 
 // 10. VARIADIC ELEMENT ACCESS (NON-CONST)
 template <typename T>
 template <typename... OperatorArgs>
-T &Tensor<T>::operator()(OperatorArgs... args)
+// T& Tensor<T>::operator()(OperatorArgs... args) { // OLD
+auto Tensor<T>::operator()(OperatorArgs... args) -> std::conditional_t<std::is_same_v<T, bool>, bool, T&>
 {
 	// Compile-time check: all arguments must be integral.
 	static_assert((std::is_integral_v<OperatorArgs> && ...),
@@ -412,7 +425,12 @@ T &Tensor<T>::operator()(OperatorArgs... args)
 		if(!is_scalar())
 			throw std::out_of_range("operator() with no arguments is only for scalar tensors.");
 
-		return _data[0];
+		// For bool, _data[0] returns a proxy, so we read its value.
+        // For other T, _data[0] returns T&.
+		if constexpr (std::is_same_v<T, bool>)
+			return static_cast<bool>(_data[0]); // Return by value
+		else
+			return _data[0]; // Return by reference
 	}
 	else
 	{
@@ -431,14 +449,20 @@ T &Tensor<T>::operator()(OperatorArgs... args)
 				") in operator() does not match tensor dimensions (" +
 				std::to_string(_shape.size()) + ").");
 		}
-		return _data[calculate_flat_index_variadic(0, 0, args...)];
+
+		size_t flat_idx = calculate_flat_index_variadic(0, 0, args...);
+		if constexpr (std::is_same_v<T, bool>)
+			return static_cast<bool>(_data[flat_idx]); // Return by value
+		else
+			return _data[flat_idx]; // Return by reference
 	}
 }
 
 // 11. VARIADIC ELEMENT ACCESS (CONST)
 template <typename T>
 template <typename... OperatorArgs>
-const T &Tensor<T>::operator()(OperatorArgs... args) const
+// const T &Tensor<T>::operator()(OperatorArgs... args) const
+auto Tensor<T>::operator()(OperatorArgs... args) const -> std::conditional_t<std::is_same_v<T, bool>, bool, const T&>
 {
 	// Compile-time check: all arguments must be integral.
 	static_assert((std::is_integral_v<OperatorArgs> && ...),
@@ -449,7 +473,10 @@ const T &Tensor<T>::operator()(OperatorArgs... args) const
 		if(!is_scalar())
 			throw std::out_of_range("operator() with no arguments is only for scalar tensors.");
 
-		return _data[0];
+		if constexpr (std::is_same_v<T, bool>)
+			return static_cast<bool>(_data[0]); // Return by value
+		else
+			return _data[0]; // Return by const reference
 	}
 	else
 	{
@@ -468,7 +495,11 @@ const T &Tensor<T>::operator()(OperatorArgs... args) const
 				") in operator() does not match tensor dimensions (" +
 				std::to_string(_shape.size()) + ").");
 		}
-		return _data[calculate_flat_index_variadic(0, 0, args...)];
+		size_t flat_idx = calculate_flat_index_variadic(0, 0, args...);
+		if constexpr (std::is_same_v<T, bool>)
+			return static_cast<bool>(_data[flat_idx]); // Return by value
+		else
+			return _data[flat_idx]; // Return by const reference
 	}
 }
 

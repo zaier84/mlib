@@ -1090,13 +1090,164 @@ TEST_F(TensorOperationsTest, ComparisonsShapeMismatch) {
 }
 
 
-// Placeholder for future scalar broadcast tests
-// TEST_F(TensorOperationsTest, AddScalarBroadcast) {
-//     Tensor<int> mat = Tensor<int>({2,2}, {1,2,3,4});
-//     int scalar_val = 10;
-//     Tensor<int> result = add(mat, scalar_val); // This needs add(Tensor, scalar) overload
-//     ASSERT_EQ(result(0,0), 1 + 10);
-//     // ...
-// }
 
-// Add more tests as you implement more operations (subtract, multiply, divide etc.)
+// --- MATMUL (2D Matrix Multiplication) TESTS ---
+
+TEST_F(TensorOperationsTest, MatmulBasicSquare) {
+    Tensor<int> A({2,2}, {1,2,3,4});   // A = [[1,2], [3,4]]
+    Tensor<int> B({2,2}, {5,6,7,8});   // B = [[5,6], [7,8]]
+    // Expected C = A * B = [[1*5+2*7, 1*6+2*8], [3*5+4*7, 3*6+4*8]]
+    //                  = [[5+14, 6+16], [15+28, 18+32]]
+    //                  = [[19, 22], [43, 50]]
+    Tensor<int> expected_C({2,2}, {19,22,43,50});
+
+    Tensor<int> C = matmul(A, B);
+    ASSERT_EQ(C.get_shape(), Tensor<int>::shape_type({2,2}));
+    for(size_t r=0; r<2; ++r) for(size_t c=0; c<2; ++c) EXPECT_EQ(C(r,c), expected_C(r,c)) << "Mismatch at (" << r << "," << c << ")";
+
+    Tensor<float> Af({2,2}, {1.f,2.f,3.f,4.f});
+    Tensor<float> Bf({2,2}, {0.5f,1.0f,1.5f,2.0f});
+    // Expected Cf = [[1*0.5+2*1.5, 1*1+2*2], [3*0.5+4*1.5, 3*1+4*2]]
+    //             = [[0.5+3, 1+4], [1.5+6, 3+8]]
+    //             = [[3.5, 5], [7.5, 11]]
+    Tensor<float> expected_Cf({2,2}, {3.5f,5.f,7.5f,11.f});
+    Tensor<float> Cf = matmul(Af, Bf);
+    ASSERT_EQ(Cf.get_shape(), Tensor<float>::shape_type({2,2}));
+    for(size_t r=0; r<2; ++r) for(size_t c=0; c<2; ++c) EXPECT_FLOAT_EQ(Cf(r,c), expected_Cf(r,c)) << "Mismatch at (" << r << "," << c << ")";
+}
+
+TEST_F(TensorOperationsTest, MatmulRectangular) {
+    Tensor<int> A({2,3}, {1,2,3,  4,5,6});       // 2x3 matrix: [[1,2,3], [4,5,6]]
+    Tensor<int> B({3,2}, {7,8,  9,10,  11,12}); // 3x2 matrix: [[7,8], [9,10], [11,12]]
+    // Expected C (2x2) = A * B
+    // C(0,0) = 1*7 + 2*9 + 3*11 = 7 + 18 + 33 = 58
+    // C(0,1) = 1*8 + 2*10 + 3*12 = 8 + 20 + 36 = 64
+    // C(1,0) = 4*7 + 5*9 + 6*11 = 28 + 45 + 66 = 139
+    // C(1,1) = 4*8 + 5*10 + 6*12 = 32 + 50 + 72 = 154
+    // C = [[58, 64], [139, 154]]
+    Tensor<int> expected_C({2,2}, {58,64,139,154});
+
+    Tensor<int> C = matmul(A, B);
+    ASSERT_EQ(C.get_shape(), Tensor<int>::shape_type({2,2}));
+    for(size_t r=0; r<2; ++r) for(size_t c=0; c<2; ++c) EXPECT_EQ(C(r,c), expected_C(r,c)) << "Mismatch at (" << r << "," << c << ")";
+}
+
+TEST_F(TensorOperationsTest, MatmulIdentity) {
+    Tensor<int> A({2,2}, {1,2,3,4});
+    Tensor<int> I({2,2}, {1,0,0,1}); // Identity matrix
+    
+    Tensor<int> C1 = matmul(A, I); // A * I = A
+    ASSERT_EQ(C1.get_shape(), A.get_shape());
+    for(size_t r=0; r<2; ++r) for(size_t c=0; c<2; ++c) EXPECT_EQ(C1(r,c), A(r,c)) << "A*I mismatch at (" << r << "," << c << ")";
+
+    Tensor<int> C2 = matmul(I, A); // I * A = A
+    ASSERT_EQ(C2.get_shape(), A.get_shape());
+    for(size_t r=0; r<2; ++r) for(size_t c=0; c<2; ++c) EXPECT_EQ(C2(r,c), A(r,c)) << "I*A mismatch at (" << r << "," << c << ")";
+}
+
+TEST_F(TensorOperationsTest, MatmulWithZeroMatrix) {
+    Tensor<int> A({2,3}, {1,2,3,4,5,6});
+    Tensor<int> ZerosB({3,2}, 0); // All zeros
+    Tensor<int> ExpectedZerosC({2,2}, 0);
+
+    Tensor<int> C = matmul(A, ZerosB);
+    ASSERT_EQ(C.get_shape(), Tensor<int>::shape_type({2,2}));
+    for(size_t r=0; r<2; ++r) for(size_t c=0; c<2; ++c) EXPECT_EQ(C(r,c), ExpectedZerosC(r,c)) << "A * ZerosB mismatch";
+
+    Tensor<int> ZerosA({2,3}, 0);
+    Tensor<int> B({3,2}, {1,2,3,4,5,6});
+    C = matmul(ZerosA, B);
+    ASSERT_EQ(C.get_shape(), Tensor<int>::shape_type({2,2}));
+    for(size_t r=0; r<2; ++r) for(size_t c=0; c<2; ++c) EXPECT_EQ(C(r,c), ExpectedZerosC(r,c)) << "ZerosA * B mismatch";
+}
+
+
+TEST_F(TensorOperationsTest, MatmulShapeMismatchInnerDim) {
+    Tensor<int> A({2,3}); // 2x3
+    Tensor<int> B({2,2}); // 2x2 (cols of A != rows of B)
+    ASSERT_THROW(matmul(A, B), ShapeMismatchError);
+}
+
+TEST_F(TensorOperationsTest, MatmulNot2D) {
+    Tensor<int> A_1D({3});
+    Tensor<int> B_2D({3,2});
+    ASSERT_THROW(matmul(A_1D, B_2D), DimensionError);
+
+    Tensor<int> A_2D({2,3});
+    Tensor<int> B_3D({3,2,1});
+    ASSERT_THROW(matmul(A_2D, B_3D), DimensionError);
+
+    Tensor<int> A_scalar(std::vector<size_t>{});
+    ASSERT_THROW(matmul(A_scalar, B_2D), DimensionError);
+    ASSERT_THROW(matmul(A_2D, A_scalar), DimensionError);
+}
+
+TEST_F(TensorOperationsTest, MatmulWithZeroDimension_k) {
+    Tensor<int> A({2,0}); // A is 2x0
+    Tensor<int> B({0,3}); // B is 0x3
+    // Result C should be 2x3, all zeros.
+    Tensor<int> C = matmul(A, B);
+    ASSERT_EQ(C.get_shape(), Tensor<int>::shape_type({2,3}));
+    ASSERT_EQ(C.get_total_size(), 2 * 3); // Or if you want 2*3=6 elements, they should be 0.
+                                       // Current Tensor constructor makes it total_size 0 if a dim is 0.
+                                       // Let's ensure for m*n elements they are all 0, if that's the convention for k=0
+                                       // The loops should handle this making C a zero tensor.
+    // If C has total_size 6 (it probably shouldn't if a dimension is zero based on our Tensor logic)
+    // you would check all C(i,j) == 0.
+    // If total_size is 0 (due to Tensor({m,n}) with k=0 input leading to k=0):
+    if (C.get_total_size() > 0) { // Only check elements if tensor is not completely empty.
+                                  // The test might pass simply due to C being an empty tensor of shape {2,3} if it implies 0 size.
+        for (size_t i=0; i<2; ++i) {
+            for (size_t j=0; j<3; ++j) {
+                ASSERT_EQ(C(i,j), 0) << "Matmul result for k=0 should be zero matrix.";
+            }
+        }
+    } else { // Current expectation for k=0 (shape_A[1]=0) is that C's elements effectively don't exist (total_size=0).
+        // C is (2,3), so should be 0. C({2,3}) is created and filled with 0s. Then the multiplication loops
+        // where k=0 won't sum anything, leaving C elements as 0.
+        // So, even if k=0, if m and n are > 0, the result should be an m x n tensor of zeros.
+        // Recheck: `Tensor<T> C({m, n});` -> This WILL allocate m*n memory and fill with 0.
+        // The loops: `if (k>0)` for the inner sum will prevent `sum_val` from changing. So C will remain a zero tensor. Correct.
+         ASSERT_EQ(C.get_total_size(), 2*3); // Should be m*n size, filled with zeros
+         for (size_t i=0; i<2; ++i) {
+            for (size_t j=0; j<3; ++j) {
+                ASSERT_EQ(C(i,j), 0) << "Matmul result for k=0 should be zero matrix.";
+            }
+        }
+    }
+
+
+    Tensor<int> A2({0,2}); // A is 0x2
+    Tensor<int> B2({2,3}); // B is 2x3
+    // Result C2 should be 0x3 (empty rows)
+    Tensor<int> C2 = matmul(A2, B2);
+    ASSERT_EQ(C2.get_shape(), Tensor<int>::shape_type({0,3}));
+    ASSERT_EQ(C2.get_total_size(), 0);
+}
+
+TEST_F(TensorOperationsTest, MatmulWithZeroDimension_m_or_n) {
+    Tensor<int> A_m0({0,2});
+    Tensor<int> B_2k({2,3});
+    Tensor<int> C_m0_result = matmul(A_m0, B_2k);
+    ASSERT_EQ(C_m0_result.get_shape(), Tensor<int>::shape_type({0,3}));
+    ASSERT_EQ(C_m0_result.get_total_size(), 0);
+
+    Tensor<int> A_k2({3,2});
+    Tensor<int> B_n0({2,0});
+    Tensor<int> C_n0_result = matmul(A_k2, B_n0);
+    ASSERT_EQ(C_n0_result.get_shape(), Tensor<int>::shape_type({3,0}));
+    ASSERT_EQ(C_n0_result.get_total_size(), 0);
+}
+
+TEST_F(TensorOperationsTest, MatmulSingleElementResult) {
+    // A (1x3) * B (3x1) -> C (1x1)
+    Tensor<int> A({1,3}, {1,2,3});
+    Tensor<int> B({3,1}, {4,5,6});
+    // C(0,0) = 1*4 + 2*5 + 3*6 = 4 + 10 + 18 = 32
+    Tensor<int> expected_C({1,1}, {32});
+
+    Tensor<int> C = matmul(A,B);
+    ASSERT_EQ(C.get_shape(), Tensor<int>::shape_type({1,1}));
+    ASSERT_EQ(C(0,0), 32);
+}
+

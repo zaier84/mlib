@@ -45,8 +45,6 @@ public:
 			const std::string& operation_name)
 		: DimensionError(build_message(shape_a, shape_b, operation_name)) {}
 
-private:
-
 	static std::string shape_to_string(const std::vector<size_t>& shape)
 	{
 		std::string s = "{";
@@ -60,6 +58,7 @@ private:
 		return s;
 	}
 
+private:
 	static std::string build_message(
 			const std::vector<size_t>& shape_a,
 			const std::vector<size_t>& shape_b,

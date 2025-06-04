@@ -1478,6 +1478,64 @@ Tensor<bool> operator<=(S scalar_value, const Tensor<T>& tensor)
 	return less_equal(scalar_value, tensor);
 }
 
+
+/**
+ * @brief Performs matrix multiplication of two 2D tensors (matrices).
+ *
+ * If A is an (m x k) matrix and B is a (k x n) matrix, the result C will be an (m x n) matrix.
+ * Each element C(i,j) is the dot product of the i-th row of A and the j-th column of B.
+ *
+ * @tparam T The data type of the tensor elements.
+ * @param A The first matrix (left-hand side). Must be 2D.
+ * @param B The second matrix (right-hand side). Must be 2D.
+ * @return A new tensor containing the result of A * B.
+ * @throw DimensionError if A or B are not 2D tensors.
+ * @throw ShapeMismatchError if the inner dimensions (A.cols vs B.rows) do not match.
+ */
+template <typename T>
+Tensor<T> matmul(const Tensor<T>& A, const Tensor<T>& B)
+{
+	if (A.ndim() != 2 || B.ndim() != 2)
+		throw DimensionError("Matrix multiplication (matmul) requires 2D tensors. Received A.ndim=" +
+			std::to_string(A.ndim()) + " and B.ndim=" +
+			std::to_string(A.ndim()) + ".");
+	
+	const auto& shape_A = A.get_shape();
+	const auto& shape_B = B.get_shape();
+
+	size_t m = shape_A[0]; // Rows of A
+	size_t k_A = shape_A[1]; // Columns of A
+	size_t k_B = shape_B[0]; // Columns of B
+	size_t n = shape_B[1]; // Column of B
+
+	if (k_A != k_B)
+		throw ShapeMismatchError("Inner dimensions for matrix multiplication do not match: A.shape=" +
+            ShapeMismatchError::shape_to_string(shape_A) + " vs B.shape=" + // Using the helper from your exception
+            ShapeMismatchError::shape_to_string(shape_B) + ".");
+
+	size_t k = k_A;
+	
+	Tensor<T> C({m, n});
+
+	for (size_t i = 0; i < m; i++) // Iterate rows of A (and C)
+	{
+		for (size_t j = 0; j < n; j++) // Iterate Columns of B (and C)
+		{
+			T sum_val = T{};
+			if (k > 0)
+			{
+				for (size_t p = 0; p < k; p++) // Iterate common dimension
+				{
+					sum_val += A(i, p) * B(p, j);
+				}
+			}
+			C(i, j) = sum_val;
+		}
+	}
+
+	return C;
+}
+
 } // namespace core
 } // namespace mlib
 

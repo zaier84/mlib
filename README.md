@@ -15,20 +15,27 @@ The long-term vision for mlib is to offer:
 
 ## Current Status
 mlib is in its early stages of development. Currently, it features:
+
 *   A foundational `Tensor` class supporting:
     *   Multiple data types.
     *   Dynamic N-dimensional shapes.
-    *   Basic constructors (shape-based, data-based, fill-value).
+    *   Constructors (shape-based, data-based, fill-value, scalar).
     *   Element access via `at()` and variadic `operator()`.
     *   Copy and move semantics.
     *   Reshaping capabilities.
-*   Initial element-wise arithmetic operations:
-    *   Addition (`+`)
-    *   Subtraction (`-`)
-    *   Unary Plus (`+`)
-    *   Unary Minus (`-`)
-*   A CMake-based build system.
-*   Unit tests using Google Test.
+    *   Custom exceptions for dimension and shape errors.
+
+*   **Element-wise Operations** (Tensor-Tensor & Tensor-Scalar):
+    *   Arithmetic: Addition (`+`), Subtraction (`-`), Multiplication (`*`), Division (`/`).
+    *   Mathematical Unary Functions: `exp`, `log`, `sqrt`, `abs`.
+    *   Comparison Operations: `==`, `!=`, `>`, `<`, `>=`, `<=` (returning `Tensor<bool>`).
+
+*   **Linear Algebra (Initial):**
+    *   2D Matrix Multiplication: `matmul(A, B)` for two 2D tensors.
+
+*   **Build & Testing:**
+    *   A CMake-based build system (supporting `mlib_core` as an INTERFACE library for now).
+    *   Unit tests using Google Test covering core Tensor functionality and operations.
 
 ## Getting Started (Preliminary)
 
@@ -51,4 +58,4 @@ cmake ..
 cmake --build . # or make
 
 # Run tests
-ctest -V
+ctest -V # For verbose output

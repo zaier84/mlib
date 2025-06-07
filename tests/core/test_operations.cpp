@@ -43,6 +43,50 @@ void AssertTensorBoolEqual(const Tensor<bool>& actual, const Tensor<bool>& expec
     }
 }
 
+// Helper function to assert that two Tensor<T> are element-wise identical for numeric types
+template<typename T_VAL> // Use a different template parameter name to avoid conflicts if needed
+void AssertTensorEqual(const mlib::core::Tensor<T_VAL>& actual, const mlib::core::Tensor<T_VAL>& expected, const std::string& context = "") {
+    ASSERT_EQ(actual.get_shape(), expected.get_shape()) << "Shape mismatch in " << context;
+    ASSERT_EQ(actual.get_total_size(), expected.get_total_size()) << "Total size mismatch in " << context;
+
+    if (actual.get_total_size() == 0) return; // Both empty and same shape/size, good.
+
+    // Robust comparison using operator()
+    if (actual.ndim() == 0) { // Scalar
+        ASSERT_EQ(actual(), expected()) << "Scalar value mismatch in " << context;
+    } else if (actual.ndim() == 1) {
+        for (size_t i = 0; i < actual.get_shape()[0]; ++i) {
+            // For floating point comparisons, use ASSERT_FLOAT_EQ or ASSERT_DOUBLE_EQ
+            if constexpr (std::is_floating_point_v<T_VAL>) {
+                ASSERT_FLOAT_EQ(actual(i), expected(i)) << "Mismatch at (" << i << ") in " << context;
+            } else {
+                ASSERT_EQ(actual(i), expected(i)) << "Mismatch at (" << i << ") in " << context;
+            }
+        }
+    } else if (actual.ndim() == 2) {
+        for (size_t i = 0; i < actual.get_shape()[0]; ++i) {
+            for (size_t j = 0; j < actual.get_shape()[1]; ++j) {
+                if constexpr (std::is_floating_point_v<T_VAL>) {
+                    ASSERT_FLOAT_EQ(actual(i,j), expected(i,j)) << "Mismatch at (" << i << "," << j << ") in " << context;
+                } else {
+                    ASSERT_EQ(actual(i,j), expected(i,j)) << "Mismatch at (" << i << "," << j << ") in " << context;
+                }
+            }
+        }
+    } else { // Fallback for >2D or general case
+        // Can add more specific loops or a flattened comparison if desired.
+        // For now, this is adequate for most common test cases.
+        // Loop through flat data:
+        for (size_t i = 0; i < actual.get_total_size(); ++i) {
+             if constexpr (std::is_floating_point_v<T_VAL>) {
+                ASSERT_FLOAT_EQ(actual.data()[i], expected.data()[i]) << "Mismatch at flat index " << i << " in " << context;
+            } else {
+                ASSERT_EQ(actual.data()[i], expected.data()[i]) << "Mismatch at flat index " << i << " in " << context;
+            }
+        }
+    }
+}
+
 class TensorOperationsTest : public ::testing::Test {
 protected:
     Tensor<int> t1_2x2 = Tensor<int>({2,2}, {1,2,3,4});
@@ -1249,5 +1293,271 @@ TEST_F(TensorOperationsTest, MatmulSingleElementResult) {
     Tensor<int> C = matmul(A,B);
     ASSERT_EQ(C.get_shape(), Tensor<int>::shape_type({1,1}));
     ASSERT_EQ(C(0,0), 32);
+}
+
+
+// --- REDUCTION OPERATION TESTS ---
+
+TEST_F(TensorOperationsTest, Sum) {
+    Tensor<int> ti_vals({2,3}, {1,2,3,4,5,6}); // sum = 21
+    ASSERT_EQ(mlib::core::sum(ti_vals), 21);
+
+    Tensor<float> tf_vals({1,4}, {1.5f, 2.5f, -1.0f, 0.5f}); // sum = 3.5f
+    ASSERT_FLOAT_EQ(mlib::core::sum(tf_vals), 3.5f);
+
+    Tensor<int> scalar_sum({}, 100);
+    ASSERT_EQ(mlib::core::sum(scalar_sum), 100);
+
+    Tensor<int> empty_sum_default; // Default constructed
+    ASSERT_EQ(mlib::core::sum(empty_sum_default), 0);
+
+    // empty_203 from fixture is Tensor<int>({2,0,3});
+    ASSERT_EQ(mlib::core::sum(empty_203), 0);
+
+    Tensor<int> one_el({1}, {7});
+    ASSERT_EQ(mlib::core::sum(one_el), 7);
+}
+
+TEST_F(TensorOperationsTest, Mean) {
+    Tensor<int> ti_vals({2,3}, {1,2,3,4,5,6}); // sum = 21, count = 6, mean = 3.5
+    ASSERT_DOUBLE_EQ(mlib::core::mean(ti_vals), 3.5);
+
+    Tensor<float> tf_vals({1,4}, {1.f, 2.f, 3.f, 6.f}); // sum = 12.f, count = 4, mean = 3.0f
+    ASSERT_DOUBLE_EQ(mlib::core::mean(tf_vals), 3.0);
+
+    Tensor<int> scalar_mean({}, 100);
+    ASSERT_DOUBLE_EQ(mlib::core::mean(scalar_mean), 100.0);
+
+    Tensor<double> td_vals({2,2}, {1.0, 2.0, 3.0, 4.0}); // sum=10, count=4, mean=2.5
+    ASSERT_DOUBLE_EQ(mlib::core::mean(td_vals), 2.5);
+
+    Tensor<int> empty_mean_default;
+    ASSERT_TRUE(std::isnan(mlib::core::mean(empty_mean_default)));
+
+    // empty_203 from fixture
+    ASSERT_TRUE(std::isnan(mlib::core::mean(empty_203)));
+}
+
+TEST_F(TensorOperationsTest, MaxVal) {
+    Tensor<int> ti_vals({2,3}, {1,-2,8,0,5,-6}); // max = 8
+    ASSERT_EQ(mlib::core::max_val(ti_vals), 8);
+
+    Tensor<float> tf_vals({1,4}, {1.5f, -200.5f, 0.0f, 100.1f}); // max = 100.1f
+    ASSERT_FLOAT_EQ(mlib::core::max_val(tf_vals), 100.1f);
+
+    Tensor<int> scalar_max({}, -10);
+    ASSERT_EQ(mlib::core::max_val(scalar_max), -10);
+
+    Tensor<int> empty_max_default;
+    ASSERT_THROW(mlib::core::max_val(empty_max_default), std::runtime_error);
+    ASSERT_THROW(mlib::core::max_val(empty_203), std::runtime_error);
+}
+
+TEST_F(TensorOperationsTest, MinVal) {
+    Tensor<int> ti_vals({2,3}, {1,-2,8,0,5,-6}); // min = -6
+    ASSERT_EQ(mlib::core::min_val(ti_vals), -6);
+
+    Tensor<float> tf_vals({1,4}, {1.5f, -200.5f, 0.0f, 100.1f}); // min = -200.5f
+    ASSERT_FLOAT_EQ(mlib::core::min_val(tf_vals), -200.5f);
+
+    Tensor<int> scalar_min({}, 77);
+    ASSERT_EQ(mlib::core::min_val(scalar_min), 77);
+
+    Tensor<int> empty_min_default;
+    ASSERT_THROW(mlib::core::min_val(empty_min_default), std::runtime_error);
+    ASSERT_THROW(mlib::core::min_val(empty_203), std::runtime_error);
+}
+
+TEST_F(TensorOperationsTest, Prod) {
+    Tensor<int> ti_vals({1,4}, {1,2,3,4}); // prod = 24
+    ASSERT_EQ(mlib::core::prod(ti_vals), 24);
+
+    Tensor<float> tf_vals({2,2}, {1.0f, 2.0f, 0.5f, 4.0f}); // prod = 4.0f
+    ASSERT_FLOAT_EQ(mlib::core::prod(tf_vals), 4.0f);
+    
+    Tensor<int> ti_with_zero({1,3}, {5,0,7}); // prod = 0
+    ASSERT_EQ(mlib::core::prod(ti_with_zero), 0);
+
+    Tensor<int> scalar_prod({}, 7);
+    ASSERT_EQ(mlib::core::prod(scalar_prod), 7);
+
+    Tensor<int> empty_prod_default;
+    ASSERT_EQ(mlib::core::prod(empty_prod_default), 1); // Product of empty set is 1
+
+    // empty_203 from fixture
+    ASSERT_EQ(mlib::core::prod(empty_203), 1);
+}
+
+
+// --- AXIS-WISE REDUCTION TESTS ---
+
+TEST_F(TensorOperationsTest, SumAxisBasic2D) {
+    Tensor<int> t({2,3}, {1,2,3,4,5,6}); // [[1,2,3],[4,5,6]]
+
+    // Sum along axis 0 (rows): result shape (3) or (1,3)
+    // [1+4, 2+5, 3+6] = [5,7,9]
+    Tensor<int> expected_sum_axis0({3}, {5,7,9});
+    AssertTensorEqual(mlib::core::sum(t, 0), expected_sum_axis0, "sum(t,0)");
+
+    // Sum along axis 0, keep_dims=true: result shape (1,3)
+    Tensor<int> expected_sum_axis0_kd({1,3}, {5,7,9});
+    AssertTensorEqual(mlib::core::sum(t, 0, true), expected_sum_axis0_kd, "sum(t,0,true)");
+
+    // Sum along axis 1 (columns): result shape (2) or (2,1)
+    // [1+2+3, 4+5+6] = [6,15]
+    Tensor<int> expected_sum_axis1({2}, {6,15});
+    AssertTensorEqual(mlib::core::sum(t, 1), expected_sum_axis1, "sum(t,1)");
+
+    // Sum along axis 1, keep_dims=true: result shape (2,1)
+    Tensor<int> expected_sum_axis1_kd({2,1}, {6,15});
+    AssertTensorEqual(mlib::core::sum(t, 1, true), expected_sum_axis1_kd, "sum(t,1,true)");
+}
+
+TEST_F(TensorOperationsTest, SumAxis3D) {
+    Tensor<int> t({2,2,2}, {1,2,3,4,5,6,7,8}); // 2x2x2 cube
+
+    // Sum along axis 0 (across first dim): result shape (2,2)
+    // [[1+5, 2+6], [3+7, 4+8]] = [[6,8],[10,12]]
+    Tensor<int> expected_sum_axis0({2,2}, {6,8,10,12});
+    AssertTensorEqual(mlib::core::sum(t, 0), expected_sum_axis0, "sum(t,0) 3D");
+
+    // Sum along axis 1 (across second dim): result shape (2,2)
+    // [[1+3, 2+4], [5+7, 6+8]] = [[4,6],[12,14]]
+    Tensor<int> expected_sum_axis1({2,2}, {4,6,12,14});
+    AssertTensorEqual(mlib::core::sum(t, 1), expected_sum_axis1, "sum(t,1) 3D");
+
+    // Sum along axis 2 (across third dim): result shape (2,2)
+    // [[1+2, 3+4], [5+6, 7+8]] = [[3,7],[11,15]]
+    Tensor<int> expected_sum_axis2({2,2}, {3,7,11,15});
+    AssertTensorEqual(mlib::core::sum(t, 2), expected_sum_axis2, "sum(t,2) 3D");
+}
+/*
+TEST_F(TensorOperationsTest, SumAxisScalarAndEmpty) {
+    Tensor<int> t({5}, {1,2,3,4,5});
+    // Summing 1D tensor reduces to scalar result (shape {})
+    AssertTensorEqual(mlib::core::sum(t, 0), Tensor<int>({}, 15), "sum 1D to scalar");
+
+    // Summing a 1D tensor along axis 0, keep_dims=true, results in (1)
+    AssertTensorEqual(mlib::core::sum(t, 0, true), Tensor<int>({1}, {15}), "sum 1D kd=true");
+
+    // Corrected error checking: Use ASSERT_THROW for cases where function throws
+    // Error: Summing scalar tensor along axis - This should THROW
+    ASSERT_THROW(mlib::core::sum(scalar1, 0), DimensionError); // scalar1 is a 0-dim tensor
+    // If you pass an invalid axis for an otherwise valid tensor
+    ASSERT_THROW(mlib::core::sum(t, 1), DimensionError); // 1D tensor, axis 1 is out of bounds
+    ASSERT_THROW(mlib::core::sum(t, -2), DimensionError); // Negative axis out of bounds for 1D tensor
+
+    // Handle empty shaped tensor:
+    // This part should work if input_shape.get_total_size() == 0 correctly returns an empty output tensor.
+    // Which it should:
+    Tensor<int> empty_t_shaped({2,0,3}); // Total size 0
+    Tensor<int> expected_empty_sum_0({0,3}); // Result from reducing axis 0 (dim 2 and 3 kept)
+    AssertTensorEqual(mlib::core::sum(empty_t_shaped, 0), expected_empty_sum_0, "sum empty over axis 0");
+    Tensor<int> expected_empty_sum_0_kd({1,0,3});
+    AssertTensorEqual(mlib::core::sum(empty_t_shaped, 0, true), expected_empty_sum_0_kd, "sum empty over axis 0 kd");
+
+    Tensor<int> expected_empty_sum_1({2,3}); // Result from reducing axis 1 (dim 2 and 3 kept). Still size 0.
+    AssertTensorEqual(mlib::core::sum(empty_t_shaped, 1), expected_empty_sum_1, "sum empty over axis 1");
+
+    // This case will be an ASSERT_THROW for the original `mean` call that was inside `sum`.
+    // It's still expected to throw:
+    Tensor<int> empty_t_full_empty; // Default constructed, 0 dimensions, 0 total size
+    // AssertTensorEqual(mlib::core::sum(empty_t_full_empty, 0), expected_sum_empty_full, "sum empty default axis 0");
+    ASSERT_THROW(mlib::core::sum(empty_t_full_empty, 0), DimensionError); // Will throw because `ndim == 0` for `empty_t_full_empty`
+}
+*/
+
+TEST_F(TensorOperationsTest, SumAxisScalarAndEmpty) {
+    std::cout << "--- Starting SumAxisScalarAndEmpty Isolation Test ---\n";
+
+    Tensor<int> t_isolated({5}, {1,2,3,4,5});
+    int expected_scalar_value = 15;
+    Tensor<int> expected_scalar_tensor({}, expected_scalar_value);
+
+    std::cout << "Call to sum(t_isolated, 0)...\n";
+    // Place your debug couts from the previous step INSIDE the sum function
+    // just BEFORE its `if (tensor.ndim() == 0)` and around the `result.data()` accumulation.
+
+    // This is the line that will execute and hopefully reveal more
+    Tensor<int> result_tensor = mlib::core::sum(t_isolated, 0);
+
+    std::cout << "sum(t_isolated, 0) returned successfully. Asserting equality...\n";
+    AssertTensorEqual(result_tensor, expected_scalar_tensor, "sum(t_isolated,0) result");
+
+    std::cout << "--- SumAxisScalarAndEmpty Isolation Test PASSED (if no crash before here) ---\n";
+}
+
+TEST_F(TensorOperationsTest, MeanAxisBasic2D) {
+    Tensor<float> t({2,3}, {1.f,2.f,3.f,4.f,5.f,6.f}); // [[1,2,3],[4,5,6]]
+
+    // Mean along axis 0: [2.5f, 3.5f, 4.5f]
+    Tensor<double> expected_mean_axis0({3}, {2.5, 3.5, 4.5});
+    AssertTensorEqual(mlib::core::mean(t, 0), expected_mean_axis0, "mean(t,0)");
+
+    // Mean along axis 1: [2.f, 5.f]
+    Tensor<double> expected_mean_axis1({2}, {2.0, 5.0});
+    AssertTensorEqual(mlib::core::mean(t, 1), expected_mean_axis1, "mean(t,1)");
+
+    // Mean along axis 1, keep_dims=true: result shape (2,1)
+    Tensor<double> expected_mean_axis1_kd({2,1}, {2.0, 5.0});
+    AssertTensorEqual(mlib::core::mean(t, 1, true), expected_mean_axis1_kd, "mean(t,1,true)");
+}
+
+TEST_F(TensorOperationsTest, MeanAxisEmptyAndZeroSize) {
+    Tensor<float> t({2,3}, {1.f,2.f,3.f,4.f,5.f,6.f});
+    // THIS SHOULD BE ASSERT_THROW, NOT A DIRECT CALL
+    ASSERT_THROW(mlib::core::mean(scalar1, 0), DimensionError); // Scalar tensor (ndim = 0)
+
+    // This block should also be ASSERT_THROW if it means `tensor.get_shape()[axis] == 0`
+    // My code previously did not wrap this. Let's add it.
+    Tensor<float> t_zero_axis_size({2,0,3}); // Axis 1 has size 0
+    ASSERT_THROW(mlib::core::mean(t_zero_axis_size, 1), std::runtime_error); // Max/Min throw runtime_error here
+
+    // Test mean on completely empty tensor (should yield NaN)
+    Tensor<float> empty_t_full_empty; // default constructed, 0 dims
+    // For `mean(tensor, axis)` this means `ndim == 0`, which will throw a `DimensionError`.
+    ASSERT_THROW(mlib::core::mean(empty_t_full_empty, 0), DimensionError); // Expect error due to 0-dim tensor
+}
+
+TEST_F(TensorOperationsTest, MaxValAxisBasic2D) {
+    Tensor<int> t({2,3}, {10,2,3,4,5,12}); // [[10,2,3],[4,5,12]]
+
+    // Max along axis 0: [max(10,4), max(2,5), max(3,12)] = [10,5,12]
+    Tensor<int> expected_max_axis0({3}, {10,5,12});
+    AssertTensorEqual(mlib::core::max_val(t, 0), expected_max_axis0, "max_val(t,0)");
+
+    // Max along axis 1: [max(10,2,3), max(4,5,12)] = [10,12]
+    Tensor<int> expected_max_axis1({2}, {10,12});
+    AssertTensorEqual(mlib::core::max_val(t, 1), expected_max_axis1, "max_val(t,1)");
+}
+
+TEST_F(TensorOperationsTest, MinValAxisBasic2D) {
+    Tensor<int> t({2,3}, {10,2,3,4,5,12}); // [[10,2,3],[4,5,12]]
+
+    // Min along axis 0: [min(10,4), min(2,5), min(3,12)] = [4,2,3]
+    Tensor<int> expected_min_axis0({3}, {4,2,3});
+    AssertTensorEqual(mlib::core::min_val(t, 0), expected_min_axis0, "min_val(t,0)");
+
+    // Min along axis 1: [min(10,2,3), min(4,5,12)] = [2,4]
+    Tensor<int> expected_min_axis1({2}, {2,4});
+    AssertTensorEqual(mlib::core::min_val(t, 1), expected_min_axis1, "min_val(t,1)");
+}
+
+TEST_F(TensorOperationsTest, ProdAxisBasic2D) {
+    Tensor<int> t({2,3}, {1,2,3,4,5,6}); // [[1,2,3],[4,5,6]]
+
+    // Prod along axis 0: [1*4, 2*5, 3*6] = [4,10,18]
+    Tensor<int> expected_prod_axis0({3}, {4,10,18});
+    AssertTensorEqual(mlib::core::prod(t, 0), expected_prod_axis0, "prod(t,0)");
+
+    // Prod along axis 1: [1*2*3, 4*5*6] = [6,120]
+    Tensor<int> expected_prod_axis1({2}, {6,120});
+    AssertTensorEqual(mlib::core::prod(t, 1), expected_prod_axis1, "prod(t,1)");
+
+    Tensor<int> t_with_zero({2,2}, {1,0,3,4}); // [[1,0],[3,4]]
+    // Prod along axis 0: [1*3, 0*4] = [3,0]
+    AssertTensorEqual(mlib::core::prod(t_with_zero, 0), Tensor<int>({2}, {3,0}), "prod(t_w_z,0)");
+    // Prod along axis 1: [1*0, 3*4] = [0,12]
+    AssertTensorEqual(mlib::core::prod(t_with_zero, 1), Tensor<int>({2}, {0,12}), "prod(t_w_z,1)");
 }
 

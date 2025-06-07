@@ -3,15 +3,20 @@
 
 #include "tensor.hpp"
 #include "exceptions.hpp"
+
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <functional>
+#include <iostream>
 #include <iterator>
+#include <limits>
+#include <numeric>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <vector>
-#include <numeric>
-#include <stdexcept>
 
 namespace mlib
 {
@@ -1534,6 +1539,482 @@ Tensor<T> matmul(const Tensor<T>& A, const Tensor<T>& B)
 	}
 
 	return C;
+}
+
+// --- Reduction Operations ---
+
+/**
+ * @brief Calculates the sum of all elements in the tensor.
+ *
+ * @tparam T The data type of the tensor elements.
+ * @param tensor The input tensor.
+ * @return The sum of all elements. Returns T{} (e.g., 0 for numeric types) for an empty tensor.
+ */
+template <typename T>
+T sum(const Tensor<T>& tensor)
+{
+	if (tensor.is_empty() && !tensor.is_scalar())
+		return T{};
+
+	return std::accumulate(tensor.data(), tensor.data() + tensor.get_total_size(), T{});
+}
+
+/**
+ * @brief Calculates the mean (average) of all elements in the tensor.
+ *
+ * @tparam T The data type of the tensor elements.
+ * @param tensor The input tensor.
+ * @return The mean of all elements as a double. Returns NaN for an empty tensor.
+ */
+template <typename T>
+double mean(const Tensor<T>& tensor)
+{
+	if (tensor.get_total_size() == 0)
+		return std::numeric_limits<double>::quiet_NaN();
+
+	if (tensor.is_scalar())
+		return static_cast<double>(tensor.data()[0]);
+
+	return static_cast<double>(sum(tensor)) / static_cast<double>(tensor.get_total_size());
+}
+
+/**
+ * @brief Finds the maximum element in the tensor.
+ *
+ * @tparam T The data type of the tensor elements.
+ * @param tensor The input tensor.
+ * @return The maximum element.
+ * @throw std::runtime_error if the tensor is empty.
+ */
+template <typename T>
+T max_val(const Tensor<T>& tensor)
+{
+	if (tensor.get_total_size() == 0)
+		throw std::runtime_error("Cannot find maximum value of an empty tensor.");
+
+	const T* max_ptr = std::max_element(tensor.data(), tensor.data() + tensor.get_total_size());
+
+	return *max_ptr;
+}
+
+/**
+ * @brief Finds the minimum element in the tensor.
+ *
+ * @tparam T The data type of the tensor elements.
+ * @param tensor The input tensor.
+ * @return The minimum element.
+ * @throw std::runtime_error if the tensor is empty.
+ */
+template <typename T>
+T min_val(const Tensor<T>& tensor)
+{
+	if (tensor.get_total_size() == 0)
+		throw std::runtime_error("Cannot find minimum value of an empty tensor.");
+
+	const T* min_ptr = std::min_element(tensor.data(), tensor.data() + tensor.get_total_size());
+
+	return *min_ptr;
+}
+
+/**
+ * @brief Calculates the product of all elements in the tensor.
+ *
+ * @tparam T The data type of the tensor elements.
+ * @param tensor The input tensor.
+ * @return The product of all elements. Returns T{1} (e.g., 1 for numeric types) for an empty tensor.
+ */
+template <typename T>
+T prod(const Tensor<T>& tensor)
+{
+	if (tensor.get_total_size() == 0)
+		return static_cast<T>(1);  // Product of an empty set is 1 (multiplicative identity)
+	
+	return std::accumulate(tensor.data(), tensor.data() + tensor.get_total_size(), static_cast<T>(1), std::multiplies<T>());
+}
+
+// Helper to convert flat index to multi-dimensional indices
+// This is effectively the inverse of calculate_flat_index
+template <typename T>
+std::vector<size_t> get_multi_dim_indices(size_t flat_idx, const Tensor<T>& tensor)
+{
+	if (tensor.ndim() == 0)
+		return {};
+
+	std::vector<size_t> indices(tensor.ndim());
+	size_t remainder = flat_idx;
+	for (size_t d = 0; d < tensor.ndim(); d++)
+	{
+		indices[d] = remainder / tensor.get_strides()[d];
+		remainder %= tensor.get_strides()[d];
+	}
+	return indices;
+}
+
+// Helper to convert multi-dimensional indices to flat index (for the result tensor)
+template <typename T_Result>
+size_t calculate_output_flat_index(const std::vector<size_t>& out_indices, const Tensor<T_Result>& result_tensor)
+{
+	size_t flat_idx = 0;
+	for (size_t d = 0; d < result_tensor.ndim(); d++)
+		flat_idx += out_indices[d] * result_tensor.get_strides()[d];
+
+	return flat_idx;
+}
+
+// Helper to build output shape for reductions
+template <typename T>
+typename Tensor<T>::shape_type build_reduced_shape(const typename Tensor<T>::shape_type& input_shape, int axis, bool keep_dims)
+{
+	typename Tensor<T>::shape_type output_shape;
+	for (size_t d = 0; d < input_shape.size(); d++)
+	{
+		if (static_cast<int>(d) == axis)
+		{
+			if (keep_dims)
+				output_shape.push_back(1);
+		}
+		else
+			output_shape.push_back(input_shape[d]);
+	}
+
+	return output_shape;
+}
+
+// --- Axis-wise Sum ---
+
+/**
+ * @brief Calculates the sum of elements along a specified axis of the tensor.
+ *
+ * @tparam T The data type of the tensor elements.
+ * @param tensor The input tensor.
+ * @param axis The dimension along which to sum. Can be negative (-ndim to -1).
+ * @param keep_dims If true, the reduced dimension will be kept as size 1 in the output shape.
+ * @return A new tensor with the sum along the specified axis.
+ * @throw DimensionError if the tensor is scalar, or if axis is out of bounds.
+ */
+template <typename T>
+Tensor<T> sum(const Tensor<T>& tensor, int axis, bool keep_dims = false)
+{
+	if (tensor.ndim() == 0)
+		throw DimensionError("Cannot sum a scalar tensor along an axis. Use mlib::core::sum(Tensor) for full sum.");
+
+	if (axis < 0)
+		axis += tensor.ndim();
+
+	if(axis < 0 || static_cast<size_t>(axis) >= tensor.ndim())
+		throw DimensionError("Axis " + std::to_string(axis) + " is out of bounds for tensor with " + std::to_string(tensor.ndim()) + " dimensions.");
+
+	typename Tensor<T>::shape_type output_shape = build_reduced_shape<T>(tensor.get_shape(), axis, keep_dims);
+
+	if (tensor.get_total_size() == 0)
+		return Tensor<T>(output_shape);
+
+	Tensor<T> result(output_shape);
+
+	for (size_t flat_idx = 0; flat_idx < tensor.get_total_size(); flat_idx++)
+	{
+		std::vector<size_t> current_in_indices = get_multi_dim_indices(flat_idx, tensor);
+
+		std::vector<size_t> current_out_indices;
+		current_out_indices.reserve(result.ndim());
+
+		for (size_t d = 0; d < tensor.ndim(); d++)
+		{
+			if (static_cast<int>(d) == axis)
+			{
+				if (keep_dims)
+					current_out_indices.push_back(0);
+			}
+			else
+				current_out_indices.push_back(current_in_indices[d]);
+		}
+
+		size_t output_flat_idx = calculate_output_flat_index(current_out_indices, result);
+
+		result.data()[output_flat_idx] += tensor.data()[flat_idx];
+	}
+
+	return result;
+}
+
+// --- Axis-wise Mean ---
+
+/**
+ * @brief Calculates the mean (average) of elements along a specified axis of the tensor.
+ *
+ * @tparam T The data type of the tensor elements.
+ * @param tensor The input tensor.
+ * @param axis The dimension along which to compute the mean. Can be negative.
+ * @param keep_dims If true, the reduced dimension will be kept as size 1 in the output shape.
+ * @return A new tensor with the mean along the specified axis.
+ * @throw DimensionError if the tensor is scalar, or if axis is out of bounds.
+ * @throw std::runtime_error if trying to calculate mean along an axis of size 0.
+ */
+template <typename T>
+Tensor<double> mean(const Tensor<T>& tensor, int axis, bool keep_dims = false)
+{
+	if (tensor.ndim() == 0)
+		throw DimensionError("Cannot compute mean of a scalar tensor along an axis. Use mlib::core::mean(Tensor) for full mean.");
+
+	if (axis < 0)
+		axis += tensor.ndim();
+
+	if (axis < 0 || static_cast<size_t>(axis) >= tensor.ndim())
+		throw DimensionError("Axis " + std::to_string(axis) + " is out of bounds for tensor with " + std::to_string(tensor.ndim()) + " dimensions.");
+
+	if (tensor.get_shape()[axis] == 0)
+	{
+		// If the axis itself has size 0 (e.g. mean of (2,0,3) along axis 1),
+        // the sum along that axis would be 0, but total_size is 0, leading to 0/0.
+        // It's like asking for mean of an empty slice.
+        // For float, this can result in NaN. For integral, it would be a divide by zero.
+        // Often, libraries return NaN for mean of empty slice.
+        // Or, if any dimension is 0 and axis is not that dimension.
+		typename Tensor<double>::shape_type output_shape = build_reduced_shape<T>(tensor.get_shape(), axis, keep_dims);
+		Tensor<double> result(output_shape);
+		if (result.get_total_size() == 0)
+			return result;
+		else
+		{
+			// Example: (2,0,3) mean over axis 0. Output (0,3). This is handled by result.get_total_size() == 0.
+            // But if (2,1) mean over axis 1 where axis 1 is [1,0]. No, this is not a valid shape.
+            // If axis 1 has 0 elements. (2,0). mean over axis 1. Sum is 0, count is 0.
+            // We return NaN if the *reduced dimension* has size 0, otherwise it's fine.
+			throw std::runtime_error("Cannot compute mean along axis " + std::to_string(axis) + " which has size 0.");
+		}
+	}
+	if (tensor.get_total_size() == 0)
+	{
+		typename Tensor<double>::shape_type output_shape = build_reduced_shape<T>(tensor.get_shape(), axis, keep_dims);
+		return Tensor<double>(output_shape);
+	}
+
+	Tensor<T> sum_result_t = sum(tensor, axis, keep_dims);
+	typename Tensor<double>::shape_type output_shape_mean = sum_result_t.get_shape();
+	Tensor<double> result(output_shape_mean);
+
+	size_t count_per_slice = tensor.get_shape()[axis]; // The number of elements that were summed for each output value
+
+	// Divide sum by count_per_slice
+	for (size_t flat_idx = 0; flat_idx < sum_result_t.get_total_size(); flat_idx++)
+		result.data()[flat_idx] = static_cast<double>(sum_result_t.data()[flat_idx]) / static_cast<double>(count_per_slice);
+
+	return result;
+}
+
+
+// --- Axis-wise Max Val ---
+
+/**
+ * @brief Finds the maximum element along a specified axis of the tensor.
+ *
+ * @tparam T The data type of the tensor elements.
+ * @param tensor The input tensor.
+ * @param axis The dimension along which to find the maximum. Can be negative.
+ * @param keep_dims If true, the reduced dimension will be kept as size 1 in the output shape.
+ * @return A new tensor with the maximum elements along the specified axis.
+ * @throw DimensionError if the tensor is scalar, or if axis is out of bounds.
+ * @throw std::runtime_error if any slice along the axis is empty.
+ */
+template <typename T>
+Tensor<T> max_val(const Tensor<T>& tensor, int axis, bool keep_dims = false)
+{
+	if (tensor.ndim() == 0)
+		throw DimensionError("Cannot compute max of a scalar tensor along an axis. Use mlib::core::max(Tensor) for full max.");
+
+	if (axis < 0)
+		axis += tensor.ndim();
+
+	if (axis < 0 || static_cast<size_t>(axis) >= tensor.ndim())
+		throw DimensionError("Axis " + std::to_string(axis) + " is out of bounds for tensor with " + std::to_string(tensor.ndim()) + " dimensions.");
+
+	if (tensor.get_shape()[axis] == 0) // If the axis itself has size 0, no max can be found
+		throw std::runtime_error("Cannot compute max along axis " + std::to_string(axis) + " which has size 0.");
+
+	if (tensor.get_total_size() == 0) // If entire tensor is empty (e.g. from 0-dim elsewhere)
+	{
+		typename Tensor<T>::shape_type output_shape = build_reduced_shape<T>(tensor.get_shape(), axis, keep_dims);
+		return Tensor<T>(output_shape);
+	}
+
+	typename Tensor<T>::shape_type output_shape = build_reduced_shape<T>(tensor.get_shape(), axis, keep_dims);
+	Tensor<T> result(output_shape);
+
+	// The length of the axis being reduced (number of elements in each slice)
+    size_t reduced_dim_size = tensor.get_shape()[axis];
+
+    // Get current_output_logical_coords
+    // A robust way to iterate output coordinates. It will be 0-dim if output is scalar.
+    // We iterate through all potential output flat indices and map back to logical coords.
+    // Then use these logical coords to build slices from the input.
+
+    for (size_t out_flat_idx = 0; out_flat_idx < result.get_total_size(); ++out_flat_idx)
+	{
+        std::vector<size_t> current_out_coords = get_multi_dim_indices(out_flat_idx, result); // This needs result.ndim()
+
+        T current_max_val = std::numeric_limits<T>::lowest(); // Initialize for comparison
+
+        std::vector<size_t> temp_in_coords_base = current_out_coords; // Copy output coords to form base input coords
+
+        // Need to insert a placeholder for 'axis' dimension in temp_in_coords_base
+        // For example if input (2,3,4) axis 1. Output (2,4).
+        // current_out_coords (r,c) maps to original (r, [p], c).
+        temp_in_coords_base.insert(temp_in_coords_base.begin() + axis, 0); // Placeholder, will be replaced by 'p'
+
+        // Loop over the elements in the slice defined by 'axis'
+        for (size_t p = 0; p < reduced_dim_size; ++p)
+		{
+            temp_in_coords_base[axis] = p; // Set the actual index along the reduced axis
+
+            size_t flat_input_idx = 0; // calculate_flat_index(temp_in_coords_base, tensor); // needs full flat indexer
+            for (size_t d = 0; d < tensor.ndim(); ++d)
+                flat_input_idx += temp_in_coords_base[d] * tensor.get_strides()[d];
+
+            T current_element = tensor.data()[flat_input_idx];
+            if (current_element > current_max_val)
+                current_max_val = current_element;
+        }
+        result.data()[out_flat_idx] = current_max_val;
+    }
+    return result;
+}
+
+
+// --- Axis-wise Min Val ---
+
+/**
+ * @brief Finds the minimum element along a specified axis of the tensor.
+ *
+ * @tparam T The data type of the tensor elements.
+ * @param tensor The input tensor.
+ * @param axis The dimension along which to find the minimum. Can be negative.
+ * @param keep_dims If true, the reduced dimension will be kept as size 1 in the output shape.
+ * @return A new tensor with the minimum elements along the specified axis.
+ * @throw DimensionError if the tensor is scalar, or if axis is out of bounds.
+ * @throw std::runtime_error if any slice along the axis is empty.
+ */
+template <typename T>
+Tensor<T> min_val(const Tensor<T>& tensor, int axis, bool keep_dims = false)
+{
+	if (tensor.ndim() == 0)
+		throw DimensionError("Cannot compute min of a scalar tensor along an axis. Use mlib::core::min(Tensor) for full min.");
+
+	if (axis < 0)
+		axis += tensor.ndim();
+
+	if (axis < 0 || static_cast<size_t>(axis) >= tensor.ndim())
+		throw DimensionError("Axis " + std::to_string(axis) + " is out of bounds for tensor with " + std::to_string(tensor.ndim()) + " dimensions.");
+
+	if (tensor.get_shape()[axis] == 0) // If the axis itself has size 0, no max can be found
+		throw std::runtime_error("Cannot compute min along axis " + std::to_string(axis) + " which has size 0.");
+
+	if (tensor.get_total_size() == 0) // If entire tensor is empty (e.g. from 0-dim elsewhere)
+	{
+		typename Tensor<T>::shape_type output_shape = build_reduced_shape<T>(tensor.get_shape(), axis, keep_dims);
+		return Tensor<T>(output_shape);
+	}
+
+	typename Tensor<T>::shape_type output_shape = build_reduced_shape<T>(tensor.get_shape(), axis, keep_dims);
+	Tensor<T> result(output_shape);
+
+	size_t reduced_dim_size = tensor.get_shape()[axis];
+
+    for (size_t out_flat_idx = 0; out_flat_idx < result.get_total_size(); ++out_flat_idx)
+	{
+        std::vector<size_t> current_out_coords = get_multi_dim_indices(out_flat_idx, result);
+
+        T current_min_val = std::numeric_limits<T>::max();
+
+        std::vector<size_t> temp_in_coords_base = current_out_coords;
+        temp_in_coords_base.insert(temp_in_coords_base.begin() + axis, 0); // Placeholder
+
+        for (size_t p = 0; p < reduced_dim_size; ++p)
+		{
+            temp_in_coords_base[axis] = p;
+
+            size_t flat_input_idx = 0;
+            for (size_t d = 0; d < tensor.ndim(); ++d)
+                flat_input_idx += temp_in_coords_base[d] * tensor.get_strides()[d];
+
+            T current_element = tensor.data()[flat_input_idx];
+            if (current_element < current_min_val)
+                current_min_val = current_element;
+        }
+        result.data()[out_flat_idx] = current_min_val;
+    }
+    return result;
+}
+
+
+// --- Axis-wise Prod ---
+
+/**
+ * @brief Calculates the product of elements along a specified axis of the tensor.
+ *
+ * @tparam T The data type of the tensor elements.
+ * @param tensor The input tensor.
+ * @param axis The dimension along which to compute the product. Can be negative.
+ * @param keep_dims If true, the reduced dimension will be kept as size 1 in the output shape.
+ * @return A new tensor with the product along the specified axis.
+ * @throw DimensionError if the tensor is scalar, or if axis is out of bounds.
+ */
+template <typename T>
+Tensor<T> prod(const Tensor<T>& tensor, int axis, int keep_dims = false)
+{
+	if (tensor.ndim() == 0)
+		throw DimensionError("Cannot compute product of a scalar tensor along an axis.. Use mlib::core::prod(Tensor) for full prod.");
+
+	if (axis < 0)
+		axis += tensor.ndim();
+
+	if (axis < 0 || static_cast<size_t>(axis) >= tensor.ndim())
+		throw DimensionError("Axis " + std::to_string(axis) + " is out of bounds for tensor with " + std::to_string(tensor.ndim()) + " dimensions.");
+
+	if (tensor.get_shape()[axis] == 0)
+	{
+        typename Tensor<T>::shape_type output_shape = build_reduced_shape<T>(tensor.get_shape(), axis, keep_dims);
+        Tensor<T> result_with_ones(output_shape);
+        // Fill result with ones (default is T{}, i.e., 0, so must re-initialize)
+        for (size_t i = 0; i < result_with_ones.get_total_size(); ++i)
+             result_with_ones.data()[i] = static_cast<T>(1);
+
+        return result_with_ones;
+    }
+    if (tensor.get_total_size() == 0)
+	{
+        typename Tensor<T>::shape_type output_shape = build_reduced_shape<T>(tensor.get_shape(), axis, keep_dims);
+        return Tensor<T>(output_shape); // Correctly returns an empty tensor, init to 0 by constructor. But should be 1 if total size != 0.
+                                          // It should still return an empty tensor for 0 total size if one of the non-axis dim is 0
+    }
+
+	typename Tensor<T>::shape_type output_shape = build_reduced_shape<T>(tensor.get_shape(), axis, keep_dims);
+	Tensor<T> result(output_shape);
+
+	size_t reduced_dim_size = tensor.get_shape()[axis];
+
+    for (size_t out_flat_idx = 0; out_flat_idx < result.get_total_size(); ++out_flat_idx)
+	{
+        std::vector<size_t> current_out_coords = get_multi_dim_indices(out_flat_idx, result); // This uses result.ndim()
+
+        T current_prod_val = static_cast<T>(1); // Initialize product to 1
+
+        std::vector<size_t> temp_in_coords_base = current_out_coords;
+        temp_in_coords_base.insert(temp_in_coords_base.begin() + axis, 0); // Placeholder
+
+        for (size_t p = 0; p < reduced_dim_size; ++p)
+		{
+            temp_in_coords_base[axis] = p;
+
+            size_t flat_input_idx = 0;
+            for (size_t d = 0; d < tensor.ndim(); ++d)
+                flat_input_idx += temp_in_coords_base[d] * tensor.get_strides()[d];
+
+            T current_element = tensor.data()[flat_input_idx];
+            current_prod_val *= current_element;
+        }
+        result.data()[out_flat_idx] = current_prod_val;
+    }
+    return result;
 }
 
 } // namespace core

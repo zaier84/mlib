@@ -187,7 +187,7 @@ Tensor<T>::Tensor(const shape_type &shape) : _shape(shape)
 {
 	// Calculate total size from shape
     if (_shape.empty())
-        _total_size = 0;
+        _total_size = 1;
     else
     {
         _total_size = 1;

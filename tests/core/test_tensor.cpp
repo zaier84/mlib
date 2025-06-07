@@ -1,5 +1,6 @@
 #include "mlib/core/tensor.hpp" // Adjust path as necessary
 #include "gtest/gtest.h"
+#include <vector>
 
 using namespace mlib::core;
 
@@ -169,51 +170,48 @@ TEST_F(TensorTest, Reshape) {
 }
 
 TEST_F(TensorTest, ScalarTensor) {
-  Tensor<float> scalar_empty_shape(std::vector<size_t>{}); // Shape {}
+  // Test default constructor (empty, not scalar - still produces 0-size, 0-dim)
+  Tensor<float> t_default;
+  ASSERT_TRUE(t_default.is_empty());
+  ASSERT_FALSE(t_default.is_scalar());
+  ASSERT_EQ(t_default.ndim(), 0);
+  ASSERT_EQ(t_default.get_total_size(), 0); // Correctly 0
+  ASSERT_TRUE(t_default.get_strides().empty());
+
+
+  // Test Tensor({}) (empty shape constructor) -> NOW PROPER SCALAR
+  Tensor<float> scalar_empty_shape(std::vector<size_t>({})); // Constructor `Tensor(const shape_type&)`
+  ASSERT_FALSE(scalar_empty_shape.is_empty()); // Is not empty now
+  ASSERT_TRUE(scalar_empty_shape.is_scalar()); // Is a scalar now
   ASSERT_EQ(scalar_empty_shape.ndim(), 0);
-  ASSERT_EQ(scalar_empty_shape.get_total_size(), 0); // Or 1 if data present
+  ASSERT_EQ(scalar_empty_shape.get_total_size(), 1); // <--- Corrected expectation (now 1)
   ASSERT_TRUE(scalar_empty_shape.get_strides().empty());
+  // Should be default-initialized to 0 for numeric types.
+  ASSERT_EQ(scalar_empty_shape(), 0.0f); // Access it. (Assumes it's scalar value, and ndim=0)
 
-  Tensor<float> scalar_from_val(
-      {},
-      5.0f); // This constructor needs thought for scalars.
-             // Current shape constructor makes total_size 0 for empty shape.
-             // Let's assume fill constructor for shape {} also means 0 elements
-             // for now. A dedicated scalar constructor might be better.
-  // ASSERT_EQ(scalar_from_val.get_total_size(), 1);
-  // ASSERT_FLOAT_EQ(scalar_from_val.data()[0], 5.0f);
+  // ... (The rest of your TensorTest.ScalarTensor should largely be okay,
+  //      as they test other constructors or reshape. Just make sure no other old
+  //      `get_total_size() == 0` for empty shape expectations.)
+  // The 'Tensor({}, 5.0f)' already tests scalar_fill:
+  Tensor<float> scalar_fill({}, 5.0f);
+  ASSERT_TRUE(scalar_fill.is_scalar());
+  ASSERT_EQ(scalar_fill.get_total_size(), 1);
+  ASSERT_FLOAT_EQ(scalar_fill(), 5.0f);
 
-  // How to create a scalar with value?
-  // Option 1: Modify constructor for shape {} and fill_value
-  // Option 2: Tensor<float> scalar_data({1}, {5.0f}); scalar_data.reshape({});
-  // Let's test reshape to scalar:
+  // The 'Tensor({}, std::vector<float>{42.0f})' already tests scalar_data:
+  Tensor<float> scalar_data({}, std::vector<float>{42.0f});
+  ASSERT_TRUE(scalar_data.is_scalar());
+  ASSERT_EQ(scalar_data.get_total_size(), 1);
+  ASSERT_FLOAT_EQ(scalar_data(), 42.0f);
+
+  // When testing reshape to scalar from (1,)
   Tensor<float> t_one_el({1}, {42.0f});
-  t_one_el.reshape({});
+  t_one_el.reshape({}); // Reshape to scalar (empty shape)
+  ASSERT_TRUE(t_one_el.is_scalar());
+  ASSERT_EQ(t_one_el.get_total_size(), 1);
   ASSERT_EQ(t_one_el.ndim(), 0);
-  ASSERT_EQ(t_one_el.get_total_size(), 1); // Total elements remains 1
-  ASSERT_TRUE(t_one_el.get_shape().empty());
-  ASSERT_TRUE(t_one_el.get_strides().empty()); // Strides for scalar are empty
-  // Accessing scalar: current at() and operator() expect indices. Needs a
-  // special way or ensure they handle 0 indices. For now, access via data() if
-  // you know it's a scalar.
-  ASSERT_FLOAT_EQ(t_one_el.data()[0], 42.0f);
-
-  // Let's refine the (shape, fill_value) constructor for scalars
-  // If shape is empty AND a fill value is given, it implies a scalar.
-  // The current constructor: Tensor(const shape_type& shape, T fill_value)
-  // if (shape.empty()) { _total_size = 0; }
-  // We might need: if (shape.empty()) { _total_size = 1; _data.assign(1,
-  // fill_value); _strides.clear(); }
-
-  Tensor<float> explicit_scalar(
-      {}, 123.0f); // Assume constructor handles this as a scalar
-                   // Revisit constructor logic for shape={} and fill_value/data
-  // If Tensor(const shape_type& shape, T fill_value) is modified:
-  // if (shape.empty()) { _total_size = 1; _data.assign(1, fill_value); /* no
-  // strides */ } Then: ASSERT_EQ(explicit_scalar.get_total_size(), 1);
-  // ASSERT_FLOAT_EQ(explicit_scalar.data()[0], 123.0f);
+  ASSERT_FLOAT_EQ(t_one_el(), 42.0f); // Access it as scalar
 }
-
 // Test `is_contiguous`
 TEST_F(TensorTest, IsContiguous) {
     Tensor<int> t_empty;

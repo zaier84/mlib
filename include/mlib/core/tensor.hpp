@@ -5,6 +5,7 @@
 #include <iostream>
 #include <memory>
 #include <numeric>
+#include <ostream>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -615,6 +616,23 @@ template <typename T> void Tensor<T>::print(std::ostream &os) const
         os << "]";
     }
     os << ")\n";
+}
+
+// --- Free function operator<< for printing Tensor objects ---
+
+/**
+ * @brief Overloads the stream insertion operator (<<) to enable direct printing
+ *        of Tensor objects to an output stream (e.g., std::cout).
+ * @tparam T The data type of the tensor elements.
+ * @param os The output stream to which the tensor will be printed.
+ * @param tensor The Tensor object to print.
+ * @return A reference to the output stream, allowing for chaining.
+ */
+template <typename T>
+std::ostream& operator<<(std::ostream& os, const Tensor<T>& tensor)
+{
+	tensor.print(os);
+	return os;
 }
 
 } // namespace core

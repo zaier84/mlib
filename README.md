@@ -100,10 +100,17 @@ ctest -V
    ```
 2. Write a simple program:
    ```cpp
-   int main() {
+   int main()
+   {
        Tensor<float> t({2, 2}, {1.0f, 2.0f, 3.0f, 4.0f});
        Tensor<float> result = t + 2.0f;
-       std::cout << result << std::endl; // Tensor(shape: {2, 2}, data: [3.0, 4.0, 5.0, 6.0])
+       std::cout << result << std::endl;
+	   /* Expected Output for 'result':
+	   Tensor(shape: {2, 2}, strides: {2, 1}, total_size: 4, data: [
+	       [3, 4]
+	       [5, 6]
+	   ])
+	   */
        return 0;
    }
    ```

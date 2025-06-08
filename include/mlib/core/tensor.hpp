@@ -56,15 +56,14 @@ public:
 
     // Variadic template for convinent access like tensor(i, j, k)
     template <typename... OperatorArgs>
-	// T &operator()(OperatorArgs... args);
 	auto operator()(OperatorArgs... args) -> std::conditional_t<std::is_same_v<T, bool>, bool, T&>;
     template <typename... OperatorArgs>
-    // const T &operator()(OperatorArgs... args) const;
 	auto operator()(OperatorArgs... args) const -> std::conditional_t<std::is_same_v<T, bool>, bool, const T&>;
 
     // Direct data access
     T *data();
     const T *data() const;
+	const data_type &get_data_vector() const;
 
     // Modifiers
     void fill(T value);
@@ -511,6 +510,10 @@ T *Tensor<T>::data() { return _data.data(); }
 // 13. RAW DATA ACCESS (CONST)
 template <typename T>
 const T *Tensor<T>::data() const { return _data.data(); }
+
+// 14. RAW DATA VECTOR (CONST)
+template <typename T>
+const typename Tensor<T>::data_type &Tensor<T>::get_data_vector() const { return _data; }
 
 // Modifier Implementations
 // 1. FILL METHOD - Sets all elements to a single value

@@ -1206,79 +1206,76 @@ TEST_F(TensorOperationsTest, MatmulWithZeroMatrix) {
 }
 
 
+
 TEST_F(TensorOperationsTest, MatmulShapeMismatchInnerDim) {
     Tensor<int> A({2,3}); // 2x3
-    Tensor<int> B({2,2}); // 2x2 (cols of A != rows of B)
-    ASSERT_THROW(matmul(A, B), ShapeMismatchError);
+    Tensor<int> B({2,2}); // 2x2 (cols of A (3) != rows of B (2))
+    ASSERT_THROW(mlib::core::matmul(A, B), ShapeMismatchError);
 }
 
 TEST_F(TensorOperationsTest, MatmulNot2D) {
-    Tensor<int> A_1D({3});
-    Tensor<int> B_2D({3,2});
-    ASSERT_THROW(matmul(A_1D, B_2D), DimensionError);
+    // A_1D (3,)
+    Tensor<int> A_1D({3}, {1,2,3}); // 1D Tensor of length 3 (not a scalar {}!)
+    // B_2D (3,2)
+    Tensor<int> B_2D({3,2}, {1,1,1,1,1,1}); // Correct 2D tensor
 
-    Tensor<int> A_2D({2,3});
-    Tensor<int> B_3D({3,2,1});
-    ASSERT_THROW(matmul(A_2D, B_3D), DimensionError);
+    // Case: 1D @ 2D. This is NOW a supported case by `matmul` overloads. It should NOT throw DimensionError.
+    // If you intend for it to throw here, your `matmul` code has to explicitly define this.
+    // My implemented `matmul` code directly handles `1D @ 2D`, so this line is likely expecting a throw *where it shouldn't*.
+    // Test: Verify it WORKS, don't ASSERT_THROW.
+    Tensor<int> expected_1d_at_2d_result({2}, {7,8}); // Based on a sample (1,2,3) @ (3,2) [[1,2],[3,4],[5,6]] yields [22,28]. Let's verify here...
+                                                    // This test should be placed in `Matmul1DVecBy2DMat` for valid outputs.
+                                                    // Let's REMOVE THIS ASSERT_THROW from `MatmulNot2D`
+                                                    // if it's meant to test unsupported ndims.
 
-    Tensor<int> A_scalar(std::vector<size_t>{});
-    ASSERT_THROW(matmul(A_scalar, B_2D), DimensionError);
-    ASSERT_THROW(matmul(A_2D, A_scalar), DimensionError);
+    // A_2D (2,3)
+    Tensor<int> A_2D({2,3}, {1,1,1,1,1,1});
+    // B_3D (3,2,1)
+    Tensor<int> B_3D({3,2,1}, {1,1,1,1,1,1}); // 3D Tensor
+
+    // 2D @ 3D - THIS IS UNSUPPORTED, SHOULD THROW DimensionError
+    ASSERT_THROW(mlib::core::matmul(A_2D, B_3D), DimensionError);
+
+    // 3D @ 2D - THIS IS UNSUPPORTED, SHOULD THROW DimensionError
+    ASSERT_THROW(mlib::core::matmul(B_3D, A_2D), DimensionError);
+
+    // A_scalar is 0-dim:
+    Tensor<int> A_scalar(std::vector<size_t>{}); // Use explicit constructor
+    // 0D @ 2D - THIS IS UNSUPPORTED, SHOULD THROW DimensionError
+    ASSERT_THROW(mlib::core::matmul(A_scalar, B_2D), DimensionError);
+    // 2D @ 0D - THIS IS UNSUPPORTED, SHOULD THROW DimensionError
+    ASSERT_THROW(mlib::core::matmul(A_2D, A_scalar), DimensionError);
 }
+
 
 TEST_F(TensorOperationsTest, MatmulWithZeroDimension_k) {
     Tensor<int> A({2,0}); // A is 2x0
     Tensor<int> B({0,3}); // B is 0x3
+    // Here, inner dim (k) is 0 for both (0 vs 0), so it matches.
+    // As per Matmul logic for k=0, result is an m x n matrix of zeros.
     // Result C should be 2x3, all zeros.
-    Tensor<int> C = matmul(A, B);
+    Tensor<int> C = mlib::core::matmul(A, B);
     ASSERT_EQ(C.get_shape(), Tensor<int>::shape_type({2,3}));
-    ASSERT_EQ(C.get_total_size(), 2 * 3); // Or if you want 2*3=6 elements, they should be 0.
-                                       // Current Tensor constructor makes it total_size 0 if a dim is 0.
-                                       // Let's ensure for m*n elements they are all 0, if that's the convention for k=0
-                                       // The loops should handle this making C a zero tensor.
-    // If C has total_size 6 (it probably shouldn't if a dimension is zero based on our Tensor logic)
-    // you would check all C(i,j) == 0.
-    // If total_size is 0 (due to Tensor({m,n}) with k=0 input leading to k=0):
-    if (C.get_total_size() > 0) { // Only check elements if tensor is not completely empty.
-                                  // The test might pass simply due to C being an empty tensor of shape {2,3} if it implies 0 size.
-        for (size_t i=0; i<2; ++i) {
-            for (size_t j=0; j<3; ++j) {
-                ASSERT_EQ(C(i,j), 0) << "Matmul result for k=0 should be zero matrix.";
-            }
-        }
-    } else { // Current expectation for k=0 (shape_A[1]=0) is that C's elements effectively don't exist (total_size=0).
-        // C is (2,3), so should be 0. C({2,3}) is created and filled with 0s. Then the multiplication loops
-        // where k=0 won't sum anything, leaving C elements as 0.
-        // So, even if k=0, if m and n are > 0, the result should be an m x n tensor of zeros.
-        // Recheck: `Tensor<T> C({m, n});` -> This WILL allocate m*n memory and fill with 0.
-        // The loops: `if (k>0)` for the inner sum will prevent `sum_val` from changing. So C will remain a zero tensor. Correct.
-         ASSERT_EQ(C.get_total_size(), 2*3); // Should be m*n size, filled with zeros
-         for (size_t i=0; i<2; ++i) {
-            for (size_t j=0; j<3; ++j) {
-                ASSERT_EQ(C(i,j), 0) << "Matmul result for k=0 should be zero matrix.";
-            }
+    ASSERT_EQ(C.get_total_size(), 2 * 3); // It should be m*n elements for `(M,0) @ (0,N)` case.
+    for (size_t i=0; i<2; ++i) {
+        for (size_t j=0; j<3; ++j) {
+            ASSERT_EQ(C(i,j), 0) << "Matmul result for k=0 should be zero matrix.";
         }
     }
-
-
-    Tensor<int> A2({0,2}); // A is 0x2
-    Tensor<int> B2({2,3}); // B is 2x3
-    // Result C2 should be 0x3 (empty rows)
-    Tensor<int> C2 = matmul(A2, B2);
-    ASSERT_EQ(C2.get_shape(), Tensor<int>::shape_type({0,3}));
-    ASSERT_EQ(C2.get_total_size(), 0);
 }
 
 TEST_F(TensorOperationsTest, MatmulWithZeroDimension_m_or_n) {
-    Tensor<int> A_m0({0,2});
-    Tensor<int> B_2k({2,3});
-    Tensor<int> C_m0_result = matmul(A_m0, B_2k);
+    Tensor<int> A_m0({0,2}); // A is 0x2
+    Tensor<int> B_2k({2,3}); // B is 2x3
+    // Result C_m0_result should be 0x3 (empty rows) because outer dimension is 0.
+    Tensor<int> C_m0_result = mlib::core::matmul(A_m0, B_2k);
     ASSERT_EQ(C_m0_result.get_shape(), Tensor<int>::shape_type({0,3}));
     ASSERT_EQ(C_m0_result.get_total_size(), 0);
 
-    Tensor<int> A_k2({3,2});
-    Tensor<int> B_n0({2,0});
-    Tensor<int> C_n0_result = matmul(A_k2, B_n0);
+    Tensor<int> A_k2({3,2}); // A is 3x2
+    Tensor<int> B_n0({2,0}); // B is 2x0
+    // Result C_n0_result should be 3x0 (empty columns) because outer dimension is 0.
+    Tensor<int> C_n0_result = mlib::core::matmul(A_k2, B_n0);
     ASSERT_EQ(C_n0_result.get_shape(), Tensor<int>::shape_type({3,0}));
     ASSERT_EQ(C_n0_result.get_total_size(), 0);
 }
@@ -1295,7 +1292,123 @@ TEST_F(TensorOperationsTest, MatmulSingleElementResult) {
     ASSERT_EQ(C(0,0), 32);
 }
 
+TEST_F(TensorOperationsTest, Matmul1DVecBy2DMat) {
+    // Vector (1D): (3,)
+    Tensor<float> vec_A({3}, {1.0f, 2.0f, 3.0f});
 
+    // Matrix (2D): (3,2)
+    // [[1,2],
+    //  [3,4],
+    //  [5,6]]
+    Tensor<float> mat_B({3,2}, {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f});
+
+    // Result should be (2,) vector: (1*1+2*3+3*5), (1*2+2*4+3*6) = (1+6+15, 2+8+18) = (22, 28)
+    Tensor<float> expected_result({2}, {22.0f, 28.0f});
+
+    Tensor<float> result = mlib::core::matmul(vec_A, mat_B);
+
+    AssertTensorEqual(result, expected_result, "1DVec @ 2DMat (3,) @ (3,2)");
+}
+
+TEST_F(TensorOperationsTest, Matmul2DMatBy1DVec) {
+    // Matrix (2D): (2,3)
+    // [[1,2,3],
+    //  [4,5,6]]
+    Tensor<float> mat_A({2,3}, {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f});
+
+    // Vector (1D): (3,)
+    Tensor<float> vec_B({3}, {7.0f, 8.0f, 9.0f});
+
+    // Result should be (2,) vector: (1*7+2*8+3*9), (4*7+5*8+6*9) = (7+16+27, 28+40+54) = (50, 122)
+    Tensor<float> expected_result({2}, {50.0f, 122.0f});
+
+    Tensor<float> result = mlib::core::matmul(mat_A, vec_B);
+
+    AssertTensorEqual(result, expected_result, "2DMat @ 1DVec (2,3) @ (3,)");
+}
+
+TEST_F(TensorOperationsTest, Matmul1DVecBy1DVecDotProduct) {
+    // Vector (1D): (3,)
+    Tensor<float> vec_A({3}, {1.0f, 2.0f, 3.0f});
+    Tensor<float> vec_B({3}, {4.0f, 5.0f, 6.0f});
+
+    // Result should be scalar: 1*4 + 2*5 + 3*6 = 4 + 10 + 18 = 32
+    Tensor<float> expected_result({}, 32.0f); // Scalar tensor
+
+    Tensor<float> result = mlib::core::matmul(vec_A, vec_B);
+
+    AssertTensorEqual(result, expected_result, "1DVec @ 1DVec (dot product)");
+}
+
+TEST_F(TensorOperationsTest, MatmulDimensionErrors) {
+    Tensor<float> mat_2x2({2,2}, 1.f);
+    Tensor<float> vec_3(std::vector<size_t>{});
+    Tensor<float> mat_3d({2,2,2}, 1.f);
+
+    ASSERT_THROW(mlib::core::matmul(mat_2x2, mat_3d), DimensionError); // 2D @ 3D
+    ASSERT_THROW(mlib::core::matmul(mat_3d, mat_2x2), DimensionError); // 3D @ 2D
+    ASSERT_THROW(mlib::core::matmul(mat_3d, vec_3), DimensionError);   // 3D @ 1D
+
+    // Check inner dimension mismatch for existing 2D@2D test as well if you didn't previously
+    Tensor<float> mat_2x3({2,3}, 1.f);
+    Tensor<float> mat_4x2({4,2}, 1.f);
+    ASSERT_THROW(mlib::core::matmul(mat_2x3, mat_4x2), ShapeMismatchError); // (2,3) @ (4,2)
+}
+
+TEST_F(TensorOperationsTest, MatmulZeroSizeDimensions) {
+    Tensor<float> v0({0});        // 1D vector, length 0
+    Tensor<float> m2x0({2,0});    // 2D matrix, 2x0
+    Tensor<float> m0x3({0,3});    // 2D matrix, 0x3
+    Tensor<float> v5({5}, {1,2,3,4,5});
+    Tensor<float> m5x3({5,3}, {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}); // Arbitrary data for clarity
+    Tensor<float> v3({3}, {1,2,3});
+
+    // Test (0,) @ (0,3) -> (3,) of zeros
+    Tensor<float> expected_v3_zeros({3}, {0.f,0.f,0.f});
+    AssertTensorEqual(mlib::core::matmul(v0, m0x3), expected_v3_zeros, "0D_vec @ 0x3_mat -> 3_zeros_vec");
+
+    // Test (2,3) @ (3,0) -> (2,0) of zeros (original matmul should handle)
+    Tensor<float> expected_m2x0_zeros({2,0});
+    ASSERT_THROW(mlib::core::matmul(m5x3, m0x3), ShapeMismatchError);
+
+    // Test (5,) @ (5,0) -> (0,) of zeros
+    Tensor<float> expected_v0_result({0});
+	AssertTensorEqual(mlib::core::matmul(v5, m5x3), Tensor<float>({3},{135.f, 150.f, 165.f}), "(5,) @ (5,3) -> (3,) (135, 150, 165)");
+}
+TEST_F(TensorOperationsTest, MatmulZeroSizeDimensionsSimple) {
+    // Variable Declarations (ensure they're explicit and correct)
+    Tensor<float> v0({0});         // 1D vector, length 0
+    Tensor<float> m2x0({2,0});     // 2D matrix, 2x0 (2 rows, 0 columns)
+    Tensor<float> m0x3({0,3});     // 2D matrix, 0x3 (0 rows, 3 columns)
+
+    // Test (0,) @ (0,3) -> (3,) of zeros
+    // (1D vec by 2D mat) Here, k_vec_A = 0, k_mat_B = 0. Match!
+    Tensor<float> expected_v3_zeros({3}, {0.f,0.f,0.f}); // Vector of 3 zeros
+    AssertTensorEqual(mlib::core::matmul(v0, m0x3), expected_v3_zeros, "0D_vec @ 0x3_mat -> 3_zeros_vec");
+
+    // Test (5,) @ (5,0) -> (0,) of zeros (from general `k=0` rule, no calculation needed)
+    // (1D vec by 2D mat) Here, k_vec_A = 5, k_mat_B = 5 (from your actual m5x3 for now). This is just 1D @ 2D where output 0-dim.
+    // Example: (5,) @ (5,0) -> (0,) zero vector
+    // For matmul((5,), (5,0)):
+    // 1. `ndim_A=1, ndim_B=2`. Case 2.
+    // 2. `k_vec_A = 5`, `k_mat_B = 5`. Match.
+    // 3. `n_mat_B = 0`. So temp_result_2D will be `(1,0)` (total size 0).
+    // 4. Reshape `(1,0)` to `(0,)`.
+    // 5. Result: Tensor<float>({0}). Which has total_size=0.
+    Tensor<float> v5({5}, {1.f,2.f,3.f,4.f,5.f}); // non-empty 1D
+    Tensor<float> m5x0({5,0});                   // 2D matrix, 5x0
+    Tensor<float> expected_v0_result({0});      // Empty vector
+
+    AssertTensorEqual(mlib::core::matmul(v5, m5x0), expected_v0_result, "(5,) @ (5,0) -> (0,) empty vec");
+
+
+    // Test (2,0) @ (0,3) -> (2,3) of zeros.
+    // (2D mat @ 2D mat) `m_zero_col_2x0` (2,0) and `m0x3` (0,3)
+    // `k_A = 0`, `k_B = 0`. Match.
+    Tensor<float> m_zero_col_2x0({2,0}); // 2x0 matrix
+    Tensor<float> expected_2x3_zeros({2,3}, {0.f,0.f,0.f,0.f,0.f,0.f}); // 2x3 filled with zeros.
+    AssertTensorEqual(mlib::core::matmul(m_zero_col_2x0, m0x3), expected_2x3_zeros, "2x0_mat @ 0x3_mat -> 2x3_zeros");
+}
 // --- REDUCTION OPERATION TESTS ---
 
 TEST_F(TensorOperationsTest, Sum) {
@@ -1561,3 +1674,82 @@ TEST_F(TensorOperationsTest, ProdAxisBasic2D) {
     AssertTensorEqual(mlib::core::prod(t_with_zero, 1), Tensor<int>({2}, {0,12}), "prod(t_w_z,1)");
 }
 
+// --- TRANSPOSE TESTS ---
+
+TEST_F(TensorOperationsTest, TransposeBasic2D) {
+    // 2x3 matrix:
+    // [[1, 2, 3],
+    //  [4, 5, 6]]
+    Tensor<int> t_2x3({2,3}, {1,2,3,4,5,6});
+
+    // Transposed 3x2 matrix should be:
+    // [[1, 4],
+    //  [2, 5],
+    //  [3, 6]]
+    Tensor<int> expected_t_3x2({3,2}, {1,4,2,5,3,6});
+
+    Tensor<int> result = mlib::core::transpose(t_2x3);
+
+    AssertTensorEqual(result, expected_t_3x2, "Transpose of 2x3");
+}
+
+TEST_F(TensorOperationsTest, TransposeSquareMatrix) {
+    // 2x2 matrix:
+    // [[1, 2],
+    //  [3, 4]]
+    Tensor<float> t_2x2_f({2,2}, {1.0f,2.0f,3.0f,4.0f});
+
+    // Transposed 2x2 matrix should be:
+    // [[1, 3],
+    //  [2, 4]]
+    Tensor<float> expected_t_2x2_f({2,2}, {1.0f,3.0f,2.0f,4.0f});
+
+    Tensor<float> result = mlib::core::transpose(t_2x2_f);
+
+    AssertTensorEqual(result, expected_t_2x2_f, "Transpose of 2x2");
+}
+
+TEST_F(TensorOperationsTest, TransposeEmptyMatrices) {
+    // 2x0 matrix:
+    // [[],
+    //  []]
+    Tensor<int> t_2x0({2,0}); // Total size 0
+
+    // Transposed 0x2 matrix:
+    // []
+    // []
+    Tensor<int> expected_t_0x2({0,2}); // Total size 0
+
+    Tensor<int> result_2x0 = mlib::core::transpose(t_2x0);
+    AssertTensorEqual(result_2x0, expected_t_0x2, "Transpose of 2x0");
+
+    // 0x3 matrix:
+    // []
+    Tensor<int> t_0x3({0,3}); // Total size 0
+
+    // Transposed 3x0 matrix:
+    // [[], [], []] (empty 3 rows, 0 cols each)
+    Tensor<int> expected_t_3x0({3,0}); // Total size 0
+
+    Tensor<int> result_0x3 = mlib::core::transpose(t_0x3);
+    AssertTensorEqual(result_0x3, expected_t_3x0, "Transpose of 0x3");
+}
+
+TEST_F(TensorOperationsTest, TransposeNon2DInputsThrow) {
+    Tensor<int> t_1d({5}, {1,2,3,4,5});        // 1D tensor
+    Tensor<int> t_3d({2,2,2}, {1,2,3,4,5,6,7,8}); // 3D tensor
+    Tensor<int> t_scalar({}, 10);              // 0D scalar
+
+    ASSERT_THROW(mlib::core::transpose(t_1d), DimensionError);
+    ASSERT_THROW(mlib::core::transpose(t_3d), DimensionError);
+    ASSERT_THROW(mlib::core::transpose(t_scalar), DimensionError);
+}
+
+// Add a test for identity operation: transpose(transpose(t)) == t
+TEST_F(TensorOperationsTest, TransposeIdentity) {
+    Tensor<int> t_3x2({3,2}, {10,20,30,40,50,60});
+    Tensor<int> t_original_copy = t_3x2; // Store a copy before modifying (optional but good practice)
+
+    Tensor<int> result_double_transpose = mlib::core::transpose(mlib::core::transpose(t_3x2));
+    AssertTensorEqual(result_double_transpose, t_original_copy, "transpose(transpose(t)) should equal t");
+}

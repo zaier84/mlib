@@ -36,37 +36,47 @@ mlib is currently header-only for ease of use and integration, with plans to eva
 
 mlib is in its early stages of development, with significant progress on its core components. Currently, it features:
 
-- **Tensor Class**:
+- **Robust Tensor Class**:
   - Multiple data types (`int`, `float`, `double`, `bool`).
   - Dynamic N-dimensional shapes, including scalar (0-dim) and zero-sized dimensions.
   - Basic constructors (shape-based, data-based, fill-value).
   - Element access via `at()` and variadic `operator()`.
   - Correct copy and move semantics.
-  - Reshaping capabilities.
+  - Reshaping capabilities (maintains total size).
   - Contiguous data handling.
-- **Element-wise Arithmetic Operations**:
+  - Stream insertion (`operator<<`) for easy printing.
+- **Extensive Element-wise Arithmetic Operations**:
   - Addition (`+`), Subtraction (`-`), Multiplication (`*`), Division (`/`).
-  - Tensor-Tensor and Tensor-Scalar operations.
+  - Supports Tensor-Tensor and Tensor-Scalar interactions.
   - Unary Plus (`+`) and Unary Minus (`-`).
 - **Unary Mathematical Functions** (element-wise):
   - Exponential (`exp`), Natural Logarithm (`log`), Square Root (`sqrt`), Absolute Value (`abs`).
 - **Element-wise Comparison Operations**:
   - Equality (`==`), Inequality (`!=`), Greater (`>`), Less (`<`), Greater Equal (`>=`), Less Equal (`<=`).
   - Results in `Tensor<bool>` (boolean masks).
-- **Matrix Multiplication**:
-  - `matmul()` for 2D tensors.
+  - Supports Tensor-Tensor and Tensor-Scalar comparisons.
+- **Comprehensive Matrix Multiplication (`matmul`)**:
+  - Performs `matmul` for 2D matrices (`(m,k) @ (k,n)` -> `(m,n)`).
+  - Automatically handles common vector-matrix interactions:
+    - 1D Vector @ 2D Matrix (`(k,) @ (k,n)` -> `(n,)`)
+    - 2D Matrix @ 1D Vector (`(m,k) @ (k,)` -> `(m,)`)
+    - 1D Vector @ 1D Vector (Dot Product: `(k,) @ (k,)` -> scalar `()`)
+  - Correctly handles zero-sized dimensions in matrices/vectors within multiplication rules.
+- **2D Matrix Transpose**:
+  - `transpose()` for 2D tensors, creating a copied transposed matrix.
 - **Full Reduction Operations**:
-  - `sum()`, `mean()`, `max_val()`, `min_val()`, `prod()`.
+  - `sum()`, `mean()`, `max_val()`, `min_val()`, `prod()` across the entire tensor.
 - **Axis-wise Reduction Operations**:
   - `sum()`, `mean()`, `max_val()`, `min_val()`, `prod()` along a specified axis, with `keep_dims` option.
 - CMake-based build system for cross-platform compatibility.
-- Comprehensive unit tests (Google Test).
+- Comprehensive unit tests (Google Test) for all implemented features, ensuring correctness and robustness.
 
 ### Known Limitations
 
-- Advanced indexing/slicing is not yet implemented.
+- Advanced indexing/slicing is not yet implemented (requires views).
+- More complex linear algebra (e.g., QR decomposition, SVD) is not available.
 - Autograd and neural network layers are under development.
-- Limited optimization for large-scale tensors (e.g., no GPU support yet).
+- Limited optimization for large-scale tensors (e.g., no GPU support, SIMD).
 
 ## Getting Started
 
@@ -105,12 +115,12 @@ ctest -V
        Tensor<float> t({2, 2}, {1.0f, 2.0f, 3.0f, 4.0f});
        Tensor<float> result = t + 2.0f;
        std::cout << result << std::endl;
-	   /* Expected Output for 'result':
-	   Tensor(shape: {2, 2}, strides: {2, 1}, total_size: 4, data: [
-	       [3, 4]
-	       [5, 6]
-	   ])
-	   */
+       /* Expected Output for 'result':
+       Tensor(shape: {2, 2}, strides: {2, 1}, total_size: 4, data: [
+           [3, 4]
+           [5, 6]
+       ])
+       */
        return 0;
    }
    ```
@@ -133,33 +143,55 @@ mlib::core::Tensor<float> B({2, 3}, {7.0f, 8.0f, 9.0f, 10.0f, 11.0f, 12.0f});
 
 // Element-wise addition
 mlib::core::Tensor<float> C = A + B;
-// C: Tensor<float>({2, 3}, {8.0, 10.0, 12.0, 14.0, 16.0, 18.0})
+// Tensor(shape: {2, 3}, strides: {3, 1}, total_size: 6, data: [
+//     [8, 10, 12]
+//     [14, 16, 18]
+// ])
 
 // Tensor-scalar multiplication
 mlib::core::Tensor<float> D = A * 2.0f;
-// D: Tensor<float>({2, 3}, {2.0, 4.0, 6.0, 8.0, 10.0, 12.0})
+// Tensor(shape: {2, 3}, strides: {3, 1}, total_size: 6, data: [
+//     [2, 4, 6]
+//     [8, 10, 12]
+// ])
 
-// Matrix multiplication
-mlib::core::Tensor<float> M1({2, 2}, {1.0f, 2.0f, 3.0f, 4.0f});
-mlib::core::Tensor<float> M2({2, 2}, {5.0f, 6.0f, 7.0f, 8.0f});
-mlib::core::Tensor<float> P = mlib::core::matmul(M1, M2);
-// P: Tensor<float>({2, 2}, {19.0, 22.0, 43.0, 50.0})
+// Comprehensive Matrix multiplication (2D @ 2D, 1D @ 2D, 2D @ 1D, 1D @ 1D)
+mlib::core::Tensor<float> M1({2, 2}, {1.0f, 2.0f, 3.0f, 4.0f}); // [[1,2],[3,4]]
+mlib::core::Tensor<float> M2({2, 2}, {5.0f, 6.0f, 7.0f, 8.0f}); // [[5,6],[7,8]]
+mlib::core::Tensor<float> P_2D_2D = mlib::core::matmul(M1, M2);
+// Tensor(shape: {2, 2}, strides: {2, 1}, total_size: 4, data: [
+//     [19, 22]
+//     [43, 50]
+// ])
+
+mlib::core::Tensor<float> V_1D({3}, {1.0f, 2.0f, 3.0f});
+mlib::core::Tensor<float> M_2D_extended({3, 2}, {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f});
+mlib::core::Tensor<float> P_1D_2D = mlib::core::matmul(V_1D, M_2D_extended);
+// Tensor(shape: {2}, strides: {1}, total_size: 2, data: [22, 28])
+
+mlib::core::Tensor<float> V_2D({3}, {4.0f, 5.0f, 6.0f});
+mlib::core::Tensor<float> P_1D_1D = mlib::core::matmul(V_1D, V_2D);
+// Tensor(shape: {}, strides: {}, total_size: 1, data: [32])
 
 // Sum reduction along an axis
-mlib::core::Tensor<float> axis_sum = mlib::core::sum(A, 1);
-// axis_sum: Tensor<float>({2}, {6.0, 15.0})
+mlib::core::Tensor<float> axis_sum = mlib::core::sum(A, 1); // Sums along columns for [[1,2,3],[4,5,6]] -> [6.0, 15.0]
+// axis_sum will print like:
+// Tensor(shape: {2}, strides: {1}, total_size: 2, data: [6, 15])
 
 // Element-wise comparison
 mlib::core::Tensor<bool> mask = A > 3.5f;
-// mask: Tensor<bool>({2, 3}, {false, false, false, true, true, true})
+// Tensor(shape: {2, 3}, strides: {3, 1}, total_size: 6, data: [
+//     [false, false, false]
+//     [true, true, true]
+// ])
 ```
 
 ## Future Development
 
-- Advanced indexing and slicing (tensor views).
-- Complex linear algebra operations (transpose, N-D matmul).
-- Automatic differentiation engine (autograd).
-- Neural network layers and activation functions.
+- Advanced indexing and slicing for tensors (creating views).
+- More complex linear algebra (e.g., QR decomposition, SVD) is not yet available.
+- Automatic differentiation engine (autograd) implementation.
+- Basic neural network layers and activation functions.
 - Serialization capabilities.
 
 ## Contributing

@@ -1497,6 +1497,7 @@ Tensor<bool> operator<=(S scalar_value, const Tensor<T>& tensor)
  * @throw DimensionError if A or B are not 2D tensors.
  * @throw ShapeMismatchError if the inner dimensions (A.cols vs B.rows) do not match.
  */
+/*
 template <typename T>
 Tensor<T> matmul(const Tensor<T>& A, const Tensor<T>& B)
 {
@@ -1539,6 +1540,146 @@ Tensor<T> matmul(const Tensor<T>& A, const Tensor<T>& B)
 	}
 
 	return C;
+}
+*/
+
+
+template <typename T>
+Tensor<T> matmul(const Tensor<T>& A, const Tensor<T>& B)
+{
+	const auto& shape_A = A.get_shape();
+	const auto& shape_B = B.get_shape();
+	size_t ndim_A = A.ndim();
+	size_t ndim_B = B.ndim();
+
+	// --- CASE 1: 2D Matrix @ 2D Matrix: (m, k) @ (k, n) -> (m, n) ---
+	if (ndim_A == 2 && ndim_B == 2)
+	{
+		size_t m = shape_A[0];   // Rows of A
+		size_t k_A = shape_A[1]; // Columns of A
+		size_t k_B = shape_B[0]; // Columns of B
+		size_t n = shape_B[1];   // Column of B
+
+
+		if (k_A != k_B)
+		{
+			throw ShapeMismatchError("Inner dimensions for matrix multiplication do not match: A.shape=" +
+				ShapeMismatchError::shape_to_string(shape_A) + " vs B.shape=" + // Using the helper from your exception
+				ShapeMismatchError::shape_to_string(shape_B) + ".");
+		}
+
+		size_t k = k_A;
+		
+		Tensor<T> C({m, n});
+
+		for (size_t i = 0; i < m; i++) // Iterate rows of A (and C)
+		{
+			for (size_t j = 0; j < n; j++) // Iterate Columns of B (and C)
+			{
+				T sum_val = T{};
+				if (k > 0)
+				{
+					for (size_t p = 0; p < k; p++) // Iterate common dimension
+					{
+						sum_val += A(i, p) * B(p, j);
+					}
+				}
+				C(i, j) = sum_val;
+			}
+		}
+
+		return C;
+	}
+	// --- END CASE 1 ---
+
+    // --- CASE 2: 1D Vector @ 2D Matrix: (k,) @ (k, n) -> (n,) ---
+	else if (ndim_A == 1 && ndim_B == 2)
+	{
+		size_t k_A = shape_A[0]; // Length of vector A
+		size_t k_B = shape_B[0]; // Rows of matrix B
+		size_t n = shape_B[1];   // Columns of matrix B
+
+		if (k_A != k_B)
+		{
+			throw ShapeMismatchError(
+                "Inner dimensions for vector-matrix multiplication (1D @ 2D) do not match: "
+                "vector length " + std::to_string(k_A) + " vs matrix rows " + std::to_string(k_B) + "."
+            );
+		}
+
+		Tensor<T> temp_vec_A_2D({1, k_A}, A.get_data_vector());
+
+		Tensor<T> temp_result_2D = matmul(temp_vec_A_2D, B);
+		
+		//std::vector<T> squeezed_data(temp_result_2D.data(), temp_result_2D.data() + temp_result_2D.get_total_size());
+		//Tensor<T> final_result({k}, squeezed_data);
+		//return final_result;
+		temp_result_2D.reshape({n});
+		return temp_result_2D;
+	}
+	// --- END CASE 2 ---
+
+    // --- CASE 3: 2D Matrix @ 1D Vector: (m, k) @ (k,) -> (m,) ---
+	else if (ndim_A == 2 && ndim_B == 1)
+	{
+		size_t m = shape_A[0];   // Rows of matrix A
+		size_t k_A = shape_A[1]; // Columns of matrix A
+		size_t k_B = shape_B[0]; // Length of vector B
+
+		if (k_A != k_B)
+		{
+			throw ShapeMismatchError(
+                "Inner dimensions for matrix-vector multiplication (2D @ 1D) do not match: "
+                "matrix columns " + std::to_string(k_A) + " vs vector length " + std::to_string(k_B) + "."
+            );
+		}
+
+		Tensor<T> temp_vec_B_2D({k_B, 1}, B.get_data_vector());
+		Tensor<T> temp_result_2D = matmul(A, temp_vec_B_2D);
+
+		//std::vector<T> squeezed_data(temp_result_2D.data(), temp_result_2D.data() + temp_result_2D.get_total_size());
+		//Tensor<T> final_result({m}, squeezed_data);
+		//return final_result;
+		temp_result_2D.reshape({m});
+		return temp_result_2D;
+	}
+	// --- END CASE 3 ---
+
+    // --- CASE 4: 1D Vector @ 1D Vector (Dot Product): (k,) @ (k,) -> scalar () ---
+	else if (ndim_A == 1 && ndim_B == 1)
+	{
+		size_t k_A = shape_A[0];
+		size_t k_B = shape_B[0];
+
+		if (k_A != k_B)
+		{
+			throw ShapeMismatchError(
+                "Inner dimensions for vector dot product (1D @ 1D) do not match: "
+                "vector A length " + std::to_string(k_A) + " vs vector B length " + std::to_string(k_B) + "."
+            );
+		}
+
+		Tensor<T> temp_vec_A_2D({1, k_A}, A.get_data_vector());
+		Tensor<T> temp_vec_B_2D({k_B, 1}, B.get_data_vector());
+		Tensor<T> temp_result_2D = matmul(temp_vec_A_2D, temp_vec_B_2D);
+
+		//std::vector<T> squeezed_data(temp_result_2D.data(), temp_result_2D.data() + temp_result_2D.get_total_size());
+		//Tensor<T> final_result({1}, squeezed_data);
+		//return final_result;
+		temp_result_2D.reshape({});
+		return temp_result_2D;
+	}
+	// --- END CASE 4 ---
+
+    // --- CASE 5: Unsupported Dimensionality Combination ---
+	else
+	{
+		throw DimensionError(
+            "Unsupported dimensions for matmul: Received A.ndim=" + std::to_string(ndim_A) +
+            " and B.ndim=" + std::to_string(ndim_B) + ". "
+            "Supported are: (1D @ 2D), (2D @ 1D), (1D @ 1D), (2D @ 2D)."
+        );
+	}
 }
 
 // --- Reduction Operations ---
@@ -2016,6 +2157,46 @@ Tensor<T> prod(const Tensor<T>& tensor, int axis, int keep_dims = false)
     }
     return result;
 }
+
+// --- Linear Algebra Operations ---
+
+/**
+ * @brief Performs a transpose operation on a 2D tensor (matrix).
+ *
+ * The rows and columns of the input matrix are swapped, creating a new matrix
+ * where the element at (j, i) in the output is the element at (i, j) in the input.
+ * This operation creates a copy of the data.
+ *
+ * @tparam T The data type of the tensor elements.
+ * @param tensor The input 2D tensor (matrix) to be transposed.
+ * @return A new Tensor<T> object representing the transposed matrix.
+ * @throw DimensionError if the input tensor is not 2D.
+ */
+template <typename T>
+Tensor<T> transpose(const Tensor<T>& tensor)
+{
+	if (tensor.ndim() != 2)
+		throw DimensionError(
+			"Transpose operation currently only supports 2D tensors (matrices). "
+            "Input tensor has " + std::to_string(tensor.ndim()) + " dimensions.");
+
+	const auto& input_shape = tensor.get_shape();
+	size_t rows = input_shape[0];
+	size_t columns = input_shape[1];
+
+	typename Tensor<T>::shape_type output_shape = {columns, rows};
+	Tensor<T> result(output_shape);
+	for (size_t r = 0; r < rows; r++)
+	{
+		for (size_t c = 0; c < columns; c++)
+		{
+			result(c, r) = tensor(r, c);
+		}
+	}
+
+	return result;
+}
+
 
 } // namespace core
 } // namespace mlib

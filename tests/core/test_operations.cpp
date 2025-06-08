@@ -44,44 +44,57 @@ void AssertTensorBoolEqual(const Tensor<bool>& actual, const Tensor<bool>& expec
 }
 
 // Helper function to assert that two Tensor<T> are element-wise identical for numeric types
-template<typename T_VAL> // Use a different template parameter name to avoid conflicts if needed
+template <typename T_VAL>
 void AssertTensorEqual(const mlib::core::Tensor<T_VAL>& actual, const mlib::core::Tensor<T_VAL>& expected, const std::string& context = "") {
     ASSERT_EQ(actual.get_shape(), expected.get_shape()) << "Shape mismatch in " << context;
-    ASSERT_EQ(actual.get_total_size(), expected.get_total_size()) << "Total size mismatch in " << context;
+    if (actual.get_total_size() == 0) {
+        ASSERT_EQ(expected.get_total_size(), 0) << "Total size mismatch for empty tensors in " << context;
+        return;
+    }
 
-    if (actual.get_total_size() == 0) return; // Both empty and same shape/size, good.
-
-    // Robust comparison using operator()
-    if (actual.ndim() == 0) { // Scalar
-        ASSERT_EQ(actual(), expected()) << "Scalar value mismatch in " << context;
-    } else if (actual.ndim() == 1) {
-        for (size_t i = 0; i < actual.get_shape()[0]; ++i) {
-            // For floating point comparisons, use ASSERT_FLOAT_EQ or ASSERT_DOUBLE_EQ
-            if constexpr (std::is_floating_point_v<T_VAL>) {
-                ASSERT_FLOAT_EQ(actual(i), expected(i)) << "Mismatch at (" << i << ") in " << context;
-            } else {
+    // New logic for checking T_VAL (bool case handled before).
+    // Now specifically check if T_VAL is float or double.
+    if constexpr (std::is_same_v<T_VAL, bool>) {
+        // ... (existing bool-specific AssertTensorEqual logic using actual() / actual(i) etc. as per previous fix) ...
+        // Your copy:
+        if (actual.ndim() == 0) {
+            ASSERT_EQ(actual(), expected()) << "Scalar value mismatch in " << context;
+        } else if (actual.ndim() == 1) {
+            for (size_t i = 0; i < actual.get_shape()[0]; ++i) {
                 ASSERT_EQ(actual(i), expected(i)) << "Mismatch at (" << i << ") in " << context;
             }
-        }
-    } else if (actual.ndim() == 2) {
-        for (size_t i = 0; i < actual.get_shape()[0]; ++i) {
-            for (size_t j = 0; j < actual.get_shape()[1]; ++j) {
-                if constexpr (std::is_floating_point_v<T_VAL>) {
-                    ASSERT_FLOAT_EQ(actual(i,j), expected(i,j)) << "Mismatch at (" << i << "," << j << ") in " << context;
-                } else {
+        } else if (actual.ndim() == 2) {
+             for (size_t i = 0; i < actual.get_shape()[0]; ++i) {
+                for (size_t j = 0; j < actual.get_shape()[1]; ++j) {
                     ASSERT_EQ(actual(i,j), expected(i,j)) << "Mismatch at (" << i << "," << j << ") in " << context;
                 }
             }
+        } else {
+            FAIL() << "AssertTensorEqual<bool> for >2D not explicitly implemented with operator() traversal, in " << context;
         }
-    } else { // Fallback for >2D or general case
-        // Can add more specific loops or a flattened comparison if desired.
-        // For now, this is adequate for most common test cases.
-        // Loop through flat data:
-        for (size_t i = 0; i < actual.get_total_size(); ++i) {
-             if constexpr (std::is_floating_point_v<T_VAL>) {
-                ASSERT_FLOAT_EQ(actual.data()[i], expected.data()[i]) << "Mismatch at flat index " << i << " in " << context;
+    } else { // For non-bool types (int, float, double), data() pointer access is fine
+        const T_VAL* actual_data = actual.data();
+        const T_VAL* expected_data = expected.data();
+
+        ASSERT_NE(actual_data, nullptr) << "Actual data pointer is null for non-empty/scalar tensor in " << context;
+        ASSERT_NE(expected_data, nullptr) << "Expected data pointer is null for non-empty/scalar tensor in " << context;
+
+        for (size_t flat_idx = 0; flat_idx < actual.get_total_size(); ++flat_idx) {
+            // CRUCIAL CHANGE HERE: Use appropriate assertion macro for floating-point types
+            if constexpr (std::is_floating_point_v<T_VAL>) {
+                // Use a tolerance for floating-point comparisons.
+                // ASSERT_NEAR(expected_value, actual_value, absolute_error_tolerance) is the most flexible.
+                // Or ASSERT_FLOAT_EQ for float, ASSERT_DOUBLE_EQ for double.
+                // ASSERT_NEAR(expected_data[flat_idx], actual_data[flat_idx], 1e-6) << "Mismatch at flat index " << flat_idx << " in " << context;
+                // If using _EQ, the default epsilon is okay for most. Let's use it for simplicity first.
+                if constexpr (std::is_same_v<T_VAL, float>) {
+                    ASSERT_FLOAT_EQ(expected_data[flat_idx], actual_data[flat_idx]) << "Mismatch at flat index " << flat_idx << " in " << context;
+                } else if constexpr (std::is_same_v<T_VAL, double>) {
+                    ASSERT_DOUBLE_EQ(expected_data[flat_idx], actual_data[flat_idx]) << "Mismatch at flat index " << flat_idx << " in " << context;
+                }
             } else {
-                ASSERT_EQ(actual.data()[i], expected.data()[i]) << "Mismatch at flat index " << i << " in " << context;
+                // For integer types (and potentially other non-float types)
+                ASSERT_EQ(actual_data[flat_idx], expected_data[flat_idx]) << "Mismatch at flat index " << flat_idx << " in " << context;
             }
         }
     }
@@ -1752,4 +1765,152 @@ TEST_F(TensorOperationsTest, TransposeIdentity) {
 
     Tensor<int> result_double_transpose = mlib::core::transpose(mlib::core::transpose(t_3x2));
     AssertTensorEqual(result_double_transpose, t_original_copy, "transpose(transpose(t)) should equal t");
+}
+
+
+// --- TENSOR CREATION ROUTINE TESTS ---
+
+TEST_F(TensorOperationsTest, ZerosCreation) {
+    // 0-dim (scalar) tensor
+    Tensor<int> expected_scalar_zero({}, 0);
+    AssertTensorEqual(mlib::core::zeros<int>(std::vector<size_t>{}), expected_scalar_zero, "zeros scalar");
+
+    // 1D tensor
+    Tensor<float> expected_1d_zeros({3}, {0.0f, 0.0f, 0.0f});
+    AssertTensorEqual(mlib::core::zeros<float>({3}), expected_1d_zeros, "zeros 1D float");
+
+    // 2D tensor
+    Tensor<int> expected_2d_zeros({2,2}, {0,0,0,0});
+    AssertTensorEqual(mlib::core::zeros<int>({2,2}), expected_2d_zeros, "zeros 2D int");
+
+    // 3D tensor
+    Tensor<double> expected_3d_zeros({1,2,3}, {0.0,0.0,0.0,0.0,0.0,0.0});
+    AssertTensorEqual(mlib::core::zeros<double>({1,2,3}), expected_3d_zeros, "zeros 3D double");
+
+    // Bool tensor
+    Tensor<bool> expected_bool_zeros({2}, {false, false});
+    AssertTensorEqual(mlib::core::zeros<bool>({2}), expected_bool_zeros, "zeros 1D bool");
+
+    // Tensor with a zero dimension (total_size=0)
+    Tensor<int> expected_zero_dim_zeros({2,0,3}); // Total size 0
+    AssertTensorEqual(mlib::core::zeros<int>({2,0,3}), expected_zero_dim_zeros, "zeros with zero dim");
+    ASSERT_TRUE(mlib::core::zeros<int>({2,0,3}).is_empty());
+}
+
+TEST_F(TensorOperationsTest, OnesCreation) {
+    // 0-dim (scalar) tensor
+    Tensor<int> expected_scalar_one({}, 1);
+    AssertTensorEqual(mlib::core::ones<int>(std::vector<size_t>{}), expected_scalar_one, "ones scalar");
+
+    // 1D tensor
+    Tensor<float> expected_1d_ones({3}, {1.0f, 1.0f, 1.0f});
+    AssertTensorEqual(mlib::core::ones<float>({3}), expected_1d_ones, "ones 1D float");
+
+    // 2D tensor
+    Tensor<int> expected_2d_ones({2,2}, {1,1,1,1});
+    AssertTensorEqual(mlib::core::ones<int>({2,2}), expected_2d_ones, "ones 2D int");
+
+    // Bool tensor
+    Tensor<bool> expected_bool_ones({2}, {true, true});
+    AssertTensorEqual(mlib::core::ones<bool>({2}), expected_bool_ones, "ones 1D bool");
+
+    // Tensor with a zero dimension (total_size=0)
+    Tensor<int> expected_zero_dim_ones({2,0,3}); // Total size 0
+    AssertTensorEqual(mlib::core::ones<int>({2,0,3}), expected_zero_dim_ones, "ones with zero dim");
+    ASSERT_TRUE(mlib::core::ones<int>({2,0,3}).is_empty());
+}
+
+TEST_F(TensorOperationsTest, FullCreation) {
+    // Scalar tensor with value
+    Tensor<float> expected_scalar_val({}, 3.14f);
+    AssertTensorEqual(mlib::core::full<float>(std::vector<size_t>{}, 3.14f), expected_scalar_val, "full scalar float");
+
+    // 1D tensor
+    Tensor<int> expected_1d_full({4}, {5,5,5,5});
+    AssertTensorEqual(mlib::core::full<int>({4}, 5), expected_1d_full, "full 1D int");
+
+    // 2D tensor with value
+    Tensor<double> expected_2d_full({2,2}, -7.0);
+    AssertTensorEqual(mlib::core::full<double>({2,2}, -7.0), expected_2d_full, "full 2D double");
+
+    // Bool tensor with value
+    Tensor<bool> expected_bool_full({3}, false);
+    AssertTensorEqual(mlib::core::full<bool>({3}, false), expected_bool_full, "full 1D bool false");
+    Tensor<bool> expected_bool_true_full({3}, true);
+    AssertTensorEqual(mlib::core::full<bool>({3}, true), expected_bool_true_full, "full 1D bool true");
+
+
+    // Tensor with a zero dimension (total_size=0)
+    Tensor<float> expected_zero_dim_full({1,0,2});
+    AssertTensorEqual(mlib::core::full<float>({1,0,2}, 99.f), expected_zero_dim_full, "full with zero dim");
+    ASSERT_TRUE(mlib::core::full<float>({1,0,2}, 99.f).is_empty());
+}
+
+TEST_F(TensorOperationsTest, EyeMatrixCreation) {
+    // 0x0 matrix (empty)
+    Tensor<int> expected_eye_0x0({0,0});
+    AssertTensorEqual(mlib::core::eye<int>(0), expected_eye_0x0, "eye 0x0");
+    ASSERT_TRUE(mlib::core::eye<int>(0).is_empty());
+
+    // 1x1 identity matrix
+    Tensor<int> expected_eye_1x1({1,1}, {1});
+    AssertTensorEqual(mlib::core::eye<int>(1), expected_eye_1x1, "eye 1x1");
+
+    // 3x3 identity matrix
+    Tensor<float> expected_eye_3x3({3,3}, {1.0f,0.0f,0.0f,
+                                            0.0f,1.0f,0.0f,
+                                            0.0f,0.0f,1.0f});
+    AssertTensorEqual(mlib::core::eye<float>(3), expected_eye_3x3, "eye 3x3 float");
+
+    // Check with boolean type
+    Tensor<bool> expected_eye_bool_2x2({2,2}, {true,false,false,true});
+    AssertTensorEqual(mlib::core::eye<bool>(2), expected_eye_bool_2x2, "eye 2x2 bool");
+}
+
+TEST_F(TensorOperationsTest, ArangeCreation) {
+    // Positive step, integer
+    Tensor<int> expected_arange_int_pos({5}, {0,1,2,3,4});
+    AssertTensorEqual(mlib::core::arange<int>(0, 5), expected_arange_int_pos, "arange int pos step 1"); // Default step 1
+    AssertTensorEqual(mlib::core::arange<int>(0, 5, 1), expected_arange_int_pos, "arange int pos step 1 explicit");
+
+    // Positive step, float
+    Tensor<float> expected_arange_float_pos({5}, {0.0f, 0.5f, 1.0f, 1.5f, 2.0f});
+    AssertTensorEqual(mlib::core::arange<float>(0.0f, 2.1f, 0.5f), expected_arange_float_pos, "arange float pos");
+
+    // Negative step, integer
+    Tensor<int> expected_arange_int_neg({5}, {5,4,3,2,1});
+    AssertTensorEqual(mlib::core::arange<int>(5, 0, -1), expected_arange_int_neg, "arange int neg step");
+
+    // Negative step, float
+    Tensor<float> expected_arange_float_neg({3}, {2.0f, 1.0f, 0.0f});
+    AssertTensorEqual(mlib::core::arange<float>(2.0f, -0.1f, -1.0f), expected_arange_float_neg, "arange float neg");
+
+    // Empty range
+    AssertTensorEqual(mlib::core::arange<int>(5, 0), Tensor<int>({0}), "arange empty pos step"); // default step
+    AssertTensorEqual(mlib::core::arange<int>(0, 5, -1), Tensor<int>({0}), "arange empty neg step");
+
+    // Error: step zero
+    ASSERT_THROW(mlib::core::arange<int>(0, 5, 0), std::invalid_argument);
+    ASSERT_THROW(mlib::core::arange<float>(0.0f, 5.0f, 0.0f), std::invalid_argument);
+}
+
+TEST_F(TensorOperationsTest, LinspaceCreation) {
+    // Basic range, 5 points
+    Tensor<float> expected_linspace_5_pts({5}, {0.0f, 0.25f, 0.5f, 0.75f, 1.0f});
+    AssertTensorEqual(mlib::core::linspace<float>(0.0f, 1.0f, 5), expected_linspace_5_pts, "linspace basic 5pts");
+
+    // Basic range, double
+    Tensor<double> expected_linspace_3_pts_double({3}, {10.0, 15.0, 20.0});
+    AssertTensorEqual(mlib::core::linspace<double>(10.0, 20.0, 3), expected_linspace_3_pts_double, "linspace basic 3pts double");
+
+    // Single point
+    Tensor<float> expected_linspace_1_pt({1}, {7.5f});
+    AssertTensorEqual(mlib::core::linspace<float>(7.5f, 10.0f, 1), expected_linspace_1_pt, "linspace 1pt");
+
+    // Negative range / reverse
+    Tensor<float> expected_linspace_neg_range({3}, {5.0f, 2.5f, 0.0f});
+    AssertTensorEqual(mlib::core::linspace<float>(5.0f, 0.0f, 3), expected_linspace_neg_range, "linspace neg range");
+
+    // Error: num_points is zero
+    ASSERT_THROW(mlib::core::linspace<float>(0.0f, 1.0f, 0), std::invalid_argument);
 }

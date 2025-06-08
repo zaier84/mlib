@@ -1,9 +1,9 @@
 # mlib: A Modern C++ Machine Learning/Deep Learning Library
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![C++ Standard](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://en.cppreference.com/w/cpp/17)
+[![C++ Standard](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
 
-**mlib** is a header-only C++ library (in development) for machine learning and deep learning tasks. Built with modern C++ (C++17+), it offers a clean, efficient, and user-friendly interface inspired by NumPy and PyTorch, delivering high performance and fine-grained control.
+**mlib** is a header-only C++ library (in development) for machine learning and deep learning tasks. Built with modern C++ (C++20+), it offers a clean, efficient, and user-friendly interface inspired by NumPy and PyTorch, delivering high performance and fine-grained control.
 
 ## Table of Contents
 
@@ -25,7 +25,7 @@ The long-term vision for mlib is to offer:
 - A comprehensive suite of mathematical operations for tensor manipulation.
 - An automatic differentiation engine (autograd) for building and training neural networks.
 - Common neural network layers, activation functions, and optimizers.
-- A focus on modern C++ (C++17 and later) features and best practices.
+- A focus on modern C++ (C++20 and later) features and best practices.
 - Clear documentation and examples.
 
 ### Design Philosophy
@@ -68,6 +68,13 @@ mlib is in its early stages of development, with significant progress on its cor
   - `sum()`, `mean()`, `max_val()`, `min_val()`, `prod()` across the entire tensor.
 - **Axis-wise Reduction Operations**:
   - `sum()`, `mean()`, `max_val()`, `min_val()`, `prod()` along a specified axis, with `keep_dims` option.
+- **Tensor Creation Routines**:
+  - `zeros()`: Creates tensors filled with zeros.
+  - `ones()`: Creates tensors filled with ones.
+  - `full()`: Creates tensors filled with a specified value.
+  - `eye()`: Creates 2D identity matrices.
+  - `arange()`: Creates 1D tensors with evenly spaced values (like NumPy's `np.arange`).
+  - `linspace()`: Creates 1D tensors with a specified number of evenly spaced samples over an interval (like NumPy's `np.linspace`).
 - CMake-based build system for cross-platform compatibility.
 - Comprehensive unit tests (Google Test) for all implemented features, ensuring correctness and robustness.
 
@@ -82,7 +89,7 @@ mlib is in its early stages of development, with significant progress on its cor
 
 **Prerequisites:**
 
-- C++17 compliant compiler (e.g., GCC, Clang, MSVC).
+- C++20 compliant compiler (e.g., GCC, Clang, MSVC).
 - CMake (version 3.22.0 or higher recommended).
 - Git (for cloning).
 
@@ -141,6 +148,26 @@ Detailed documentation is under development. For now, refer to:
 mlib::core::Tensor<float> A({2, 3}, {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f});
 mlib::core::Tensor<float> B({2, 3}, {7.0f, 8.0f, 9.0f, 10.0f, 11.0f, 12.0f});
 
+// Tensor Creation Routines
+mlib::core::Tensor<int> zeros_matrix = mlib::core::zeros<int>({2, 2});
+// Tensor(shape: {2, 2}, strides: {2, 1}, total_size: 4, data: [
+//     [0, 0]
+//     [0, 0]
+// ])
+
+mlib::core::Tensor<float> identity_matrix = mlib::core::eye<float>(3);
+// Tensor(shape: {3, 3}, strides: {3, 1}, total_size: 9, data: [
+//     [1, 0, 0]
+//     [0, 1, 0]
+//     [0, 0, 1]
+// ])
+
+mlib::core::Tensor<int> range_tensor = mlib::core::arange<int>(0, 5, 1); // 0, 1, 2, 3, 4
+// Tensor(shape: {5}, strides: {1}, total_size: 5, data: [0, 1, 2, 3, 4])
+
+mlib::core::Tensor<float> linspace_tensor = mlib::core::linspace<float>(0.0f, 1.0f, 5); // 0.0, 0.25, 0.5, 0.75, 1.0
+// Tensor(shape: {5}, strides: {1}, total_size: 5, data: [0, 0.25, 0.5, 0.75, 1])
+
 // Element-wise addition
 mlib::core::Tensor<float> C = A + B;
 // Tensor(shape: {2, 3}, strides: {3, 1}, total_size: 6, data: [
@@ -175,7 +202,6 @@ mlib::core::Tensor<float> P_1D_1D = mlib::core::matmul(V_1D, V_2D);
 
 // Sum reduction along an axis
 mlib::core::Tensor<float> axis_sum = mlib::core::sum(A, 1); // Sums along columns for [[1,2,3],[4,5,6]] -> [6.0, 15.0]
-// axis_sum will print like:
 // Tensor(shape: {2}, strides: {1}, total_size: 2, data: [6, 15])
 
 // Element-wise comparison

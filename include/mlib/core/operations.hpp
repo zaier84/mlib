@@ -1483,67 +1483,26 @@ Tensor<bool> operator<=(S scalar_value, const Tensor<T>& tensor)
 	return less_equal(scalar_value, tensor);
 }
 
-
 /**
- * @brief Performs matrix multiplication of two 2D tensors (matrices).
+ * @brief Performs matrix multiplication between two tensors, supporting various
+ *        combinations of 1D (vectors) and 2D (matrices) inputs.
  *
- * If A is an (m x k) matrix and B is a (k x n) matrix, the result C will be an (m x n) matrix.
- * Each element C(i,j) is the dot product of the i-th row of A and the j-th column of B.
+ * This function dispatches to specific linear algebra routines based on input
+ * tensor dimensionalities (ndim):
+ * - If A is (m, k) and B is (k, n): Returns (m, n) matrix. (2D @ 2D)
+ * - If A is (k,) and B is (k, n): Returns (n,) vector (A is treated as (1, k) row vector). (1D @ 2D)
+ * - If A is (m, k) and B is (k,): Returns (m,) vector (B is treated as (k, 1) column vector). (2D @ 1D)
+ * - If A is (k,) and B is (k,): Returns scalar () (A as (1,k), B as (k,1) for dot product). (1D @ 1D)
+ *
+ * All operations involve creating temporary copies of data if needed for 1D->2D conversions.
  *
  * @tparam T The data type of the tensor elements.
- * @param A The first matrix (left-hand side). Must be 2D.
- * @param B The second matrix (right-hand side). Must be 2D.
- * @return A new tensor containing the result of A * B.
- * @throw DimensionError if A or B are not 2D tensors.
- * @throw ShapeMismatchError if the inner dimensions (A.cols vs B.rows) do not match.
+ * @param A The first tensor (left-hand side).
+ * @param B The second tensor (right-hand side).
+ * @return A new tensor containing the result of A @ B.
+ * @throw DimensionError if input dimensions are incompatible (e.g., 3D or unsupported 0D inputs).
+ * @throw ShapeMismatchError if inner dimensions do not match for multiplication.
  */
-/*
-template <typename T>
-Tensor<T> matmul(const Tensor<T>& A, const Tensor<T>& B)
-{
-	if (A.ndim() != 2 || B.ndim() != 2)
-		throw DimensionError("Matrix multiplication (matmul) requires 2D tensors. Received A.ndim=" +
-			std::to_string(A.ndim()) + " and B.ndim=" +
-			std::to_string(A.ndim()) + ".");
-	
-	const auto& shape_A = A.get_shape();
-	const auto& shape_B = B.get_shape();
-
-	size_t m = shape_A[0]; // Rows of A
-	size_t k_A = shape_A[1]; // Columns of A
-	size_t k_B = shape_B[0]; // Columns of B
-	size_t n = shape_B[1]; // Column of B
-
-	if (k_A != k_B)
-		throw ShapeMismatchError("Inner dimensions for matrix multiplication do not match: A.shape=" +
-            ShapeMismatchError::shape_to_string(shape_A) + " vs B.shape=" + // Using the helper from your exception
-            ShapeMismatchError::shape_to_string(shape_B) + ".");
-
-	size_t k = k_A;
-	
-	Tensor<T> C({m, n});
-
-	for (size_t i = 0; i < m; i++) // Iterate rows of A (and C)
-	{
-		for (size_t j = 0; j < n; j++) // Iterate Columns of B (and C)
-		{
-			T sum_val = T{};
-			if (k > 0)
-			{
-				for (size_t p = 0; p < k; p++) // Iterate common dimension
-				{
-					sum_val += A(i, p) * B(p, j);
-				}
-			}
-			C(i, j) = sum_val;
-		}
-	}
-
-	return C;
-}
-*/
-
-
 template <typename T>
 Tensor<T> matmul(const Tensor<T>& A, const Tensor<T>& B)
 {
@@ -1580,9 +1539,7 @@ Tensor<T> matmul(const Tensor<T>& A, const Tensor<T>& B)
 				if (k > 0)
 				{
 					for (size_t p = 0; p < k; p++) // Iterate common dimension
-					{
 						sum_val += A(i, p) * B(p, j);
-					}
 				}
 				C(i, j) = sum_val;
 			}
@@ -1608,12 +1565,8 @@ Tensor<T> matmul(const Tensor<T>& A, const Tensor<T>& B)
 		}
 
 		Tensor<T> temp_vec_A_2D({1, k_A}, A.get_data_vector());
-
 		Tensor<T> temp_result_2D = matmul(temp_vec_A_2D, B);
 		
-		//std::vector<T> squeezed_data(temp_result_2D.data(), temp_result_2D.data() + temp_result_2D.get_total_size());
-		//Tensor<T> final_result({k}, squeezed_data);
-		//return final_result;
 		temp_result_2D.reshape({n});
 		return temp_result_2D;
 	}
@@ -1637,9 +1590,6 @@ Tensor<T> matmul(const Tensor<T>& A, const Tensor<T>& B)
 		Tensor<T> temp_vec_B_2D({k_B, 1}, B.get_data_vector());
 		Tensor<T> temp_result_2D = matmul(A, temp_vec_B_2D);
 
-		//std::vector<T> squeezed_data(temp_result_2D.data(), temp_result_2D.data() + temp_result_2D.get_total_size());
-		//Tensor<T> final_result({m}, squeezed_data);
-		//return final_result;
 		temp_result_2D.reshape({m});
 		return temp_result_2D;
 	}
@@ -1663,9 +1613,6 @@ Tensor<T> matmul(const Tensor<T>& A, const Tensor<T>& B)
 		Tensor<T> temp_vec_B_2D({k_B, 1}, B.get_data_vector());
 		Tensor<T> temp_result_2D = matmul(temp_vec_A_2D, temp_vec_B_2D);
 
-		//std::vector<T> squeezed_data(temp_result_2D.data(), temp_result_2D.data() + temp_result_2D.get_total_size());
-		//Tensor<T> final_result({1}, squeezed_data);
-		//return final_result;
 		temp_result_2D.reshape({});
 		return temp_result_2D;
 	}
@@ -1972,22 +1919,15 @@ Tensor<T> max_val(const Tensor<T>& tensor, int axis, bool keep_dims = false)
 	if (tensor.get_shape()[axis] == 0) // If the axis itself has size 0, no max can be found
 		throw std::runtime_error("Cannot compute max along axis " + std::to_string(axis) + " which has size 0.");
 
-	if (tensor.get_total_size() == 0) // If entire tensor is empty (e.g. from 0-dim elsewhere)
-	{
-		typename Tensor<T>::shape_type output_shape = build_reduced_shape<T>(tensor.get_shape(), axis, keep_dims);
-		return Tensor<T>(output_shape);
-	}
-
 	typename Tensor<T>::shape_type output_shape = build_reduced_shape<T>(tensor.get_shape(), axis, keep_dims);
+
+	if (tensor.get_total_size() == 0) // If entire tensor is empty (e.g. from 0-dim elsewhere)
+		return Tensor<T>(output_shape);
+
 	Tensor<T> result(output_shape);
 
 	// The length of the axis being reduced (number of elements in each slice)
     size_t reduced_dim_size = tensor.get_shape()[axis];
-
-    // Get current_output_logical_coords
-    // A robust way to iterate output coordinates. It will be 0-dim if output is scalar.
-    // We iterate through all potential output flat indices and map back to logical coords.
-    // Then use these logical coords to build slices from the input.
 
     for (size_t out_flat_idx = 0; out_flat_idx < result.get_total_size(); ++out_flat_idx)
 	{
@@ -2005,9 +1945,9 @@ Tensor<T> max_val(const Tensor<T>& tensor, int axis, bool keep_dims = false)
         // Loop over the elements in the slice defined by 'axis'
         for (size_t p = 0; p < reduced_dim_size; ++p)
 		{
-            temp_in_coords_base[axis] = p; // Set the actual index along the reduced axis
+            temp_in_coords_base[axis] = p;
 
-            size_t flat_input_idx = 0; // calculate_flat_index(temp_in_coords_base, tensor); // needs full flat indexer
+            size_t flat_input_idx = 0;
             for (size_t d = 0; d < tensor.ndim(); ++d)
                 flat_input_idx += temp_in_coords_base[d] * tensor.get_strides()[d];
 
@@ -2049,13 +1989,11 @@ Tensor<T> min_val(const Tensor<T>& tensor, int axis, bool keep_dims = false)
 	if (tensor.get_shape()[axis] == 0) // If the axis itself has size 0, no max can be found
 		throw std::runtime_error("Cannot compute min along axis " + std::to_string(axis) + " which has size 0.");
 
-	if (tensor.get_total_size() == 0) // If entire tensor is empty (e.g. from 0-dim elsewhere)
-	{
-		typename Tensor<T>::shape_type output_shape = build_reduced_shape<T>(tensor.get_shape(), axis, keep_dims);
-		return Tensor<T>(output_shape);
-	}
-
 	typename Tensor<T>::shape_type output_shape = build_reduced_shape<T>(tensor.get_shape(), axis, keep_dims);
+
+	if (tensor.get_total_size() == 0) // If entire tensor is empty (e.g. from 0-dim elsewhere)
+		return Tensor<T>(output_shape);
+
 	Tensor<T> result(output_shape);
 
 	size_t reduced_dim_size = tensor.get_shape()[axis];
@@ -2111,9 +2049,10 @@ Tensor<T> prod(const Tensor<T>& tensor, int axis, int keep_dims = false)
 	if (axis < 0 || static_cast<size_t>(axis) >= tensor.ndim())
 		throw DimensionError("Axis " + std::to_string(axis) + " is out of bounds for tensor with " + std::to_string(tensor.ndim()) + " dimensions.");
 
+    typename Tensor<T>::shape_type output_shape = build_reduced_shape<T>(tensor.get_shape(), axis, keep_dims);
+
 	if (tensor.get_shape()[axis] == 0)
 	{
-        typename Tensor<T>::shape_type output_shape = build_reduced_shape<T>(tensor.get_shape(), axis, keep_dims);
         Tensor<T> result_with_ones(output_shape);
         // Fill result with ones (default is T{}, i.e., 0, so must re-initialize)
         for (size_t i = 0; i < result_with_ones.get_total_size(); ++i)
@@ -2122,13 +2061,8 @@ Tensor<T> prod(const Tensor<T>& tensor, int axis, int keep_dims = false)
         return result_with_ones;
     }
     if (tensor.get_total_size() == 0)
-	{
-        typename Tensor<T>::shape_type output_shape = build_reduced_shape<T>(tensor.get_shape(), axis, keep_dims);
-        return Tensor<T>(output_shape); // Correctly returns an empty tensor, init to 0 by constructor. But should be 1 if total size != 0.
-                                          // It should still return an empty tensor for 0 total size if one of the non-axis dim is 0
-    }
+        return Tensor<T>(output_shape); // Correctly returns an empty tensor
 
-	typename Tensor<T>::shape_type output_shape = build_reduced_shape<T>(tensor.get_shape(), axis, keep_dims);
 	Tensor<T> result(output_shape);
 
 	size_t reduced_dim_size = tensor.get_shape()[axis];
@@ -2176,9 +2110,11 @@ template <typename T>
 Tensor<T> transpose(const Tensor<T>& tensor)
 {
 	if (tensor.ndim() != 2)
+	{
 		throw DimensionError(
 			"Transpose operation currently only supports 2D tensors (matrices). "
             "Input tensor has " + std::to_string(tensor.ndim()) + " dimensions.");
+	}
 
 	const auto& input_shape = tensor.get_shape();
 	size_t rows = input_shape[0];
@@ -2189,14 +2125,174 @@ Tensor<T> transpose(const Tensor<T>& tensor)
 	for (size_t r = 0; r < rows; r++)
 	{
 		for (size_t c = 0; c < columns; c++)
-		{
 			result(c, r) = tensor(r, c);
-		}
 	}
 
 	return result;
 }
 
+// Helper function to calculate total_size from shape
+// This is duplicated from Tensor constructors, can be refactored into a private helper later if desired.
+size_t calculate_total_size_from_shape(const typename Tensor<size_t>::shape_type& shape)
+{
+    size_t total_size = 1;
+    if (shape.empty())
+        total_size = 1; // Scalar tensor (total_size 1)
+    else
+	{
+        for (size_t dim_size : shape)
+		{
+            if (dim_size == 0)
+			{
+                total_size = 0;
+                break;
+            }
+            total_size *= dim_size;
+        }
+    }
+    return total_size;
+}
+
+/**
+ * @brief Creates a tensor filled with zeros.
+ *
+ * @tparam T The data type of the tensor elements. Must be arithmetic or boolean.
+ * @param shape The desired shape of the tensor.
+ * @return A new Tensor<T> object filled with zeros.
+ */
+template <typename T>
+Tensor<T> zeros(const typename Tensor<T>::shape_type& shape)
+{
+	static_assert(std::is_arithmetic_v<T> || std::is_same_v<T, bool>, "Tensor type for 'zeros' must be arithmetic or boolean.");
+
+	size_t total_size = calculate_total_size_from_shape(shape);
+	std::vector<T> data_vector(total_size);
+	std::fill(data_vector.begin(), data_vector.end(), T{});
+	return Tensor<T>(shape, data_vector);
+}
+
+/**
+ * @brief Creates a tensor filled with ones.
+ *
+ * @tparam T The data type of the tensor elements. Must be arithmetic or boolean.
+ * @param shape The desired shape of the tensor.
+ * @return A new Tensor<T> object filled with ones.
+ */
+template <typename T>
+Tensor<T> ones(const typename Tensor<T>::shape_type& shape)
+{
+	static_assert(std::is_arithmetic_v<T> || std::is_same_v<T, bool>, "Tensor type for 'ones' must be arithmetic or boolean.");
+
+	size_t total_size = calculate_total_size_from_shape(shape);
+	std::vector<T> data_vector(total_size);
+	std::fill(data_vector.begin(), data_vector.end(), static_cast<T>(1));
+	return Tensor<T>(shape, data_vector);
+}
+
+/**
+ * @brief Creates a tensor filled with a specified value.
+ *
+ * @tparam T The data type of the tensor elements.
+ * @param shape The desired shape of the tensor.
+ * @param fill_value The value to fill all elements with.
+ * @return A new Tensor<T> object filled with `fill_value`.
+ */
+template <typename T>
+Tensor<T> full(const typename Tensor<T>::shape_type& shape, T fill_value)
+{
+	size_t total_size = calculate_total_size_from_shape(shape);
+	std::vector<T> data_vector(total_size);
+	std::fill(data_vector.begin(), data_vector.end(), fill_value);
+	return Tensor<T>(shape, data_vector);
+}
+
+/**
+ * @brief Creates a 2D identity matrix (eye).
+ *
+ * @tparam T The data type of the matrix elements.
+ * @param N The number of rows and columns (matrix will be NxN).
+ * @return A new Tensor<T> object representing an NxN identity matrix.
+ */
+template <typename T>
+Tensor<T> eye(size_t N)
+{
+	static_assert(std::is_arithmetic_v<T> || std::is_same_v<T, bool>, "Tensor type for 'eye' must be arithmetic or boolean.");
+
+	typename Tensor<T>::shape_type shape = {N, N};
+	size_t total_size = N * N;
+	std::vector<T> data_vector(total_size);
+	std::fill(data_vector.begin(), data_vector.end(), T{});
+
+	for (size_t i = 0; i < N; i++)
+		data_vector[i * N + i] = static_cast<T>(1);
+
+	return Tensor<T>(shape, data_vector);
+}
+
+/**
+ * @brief Creates a 1D tensor with evenly spaced values within a half-open interval [start, stop).
+ *        Similar to Python's range or NumPy's arange.
+ *
+ * @tparam T The data type of the tensor elements. Must be arithmetic.
+ * @param start The start of the interval (inclusive).
+ * @param stop The end of the interval (exclusive).
+ * @param step The step size between values. Defaults to 1 (or 1.0f for float/double).
+ * @return A new 1D Tensor<T> containing the generated sequence.
+ * @throw std::invalid_argument if step is zero.
+ */
+template <typename T>
+Tensor<T> arange(T start, T stop, T step = static_cast<T>(1))
+{
+	static_assert(std::is_arithmetic_v<T>, "Tensor type for 'arange' must be arithmetic.");
+	
+	if (step == static_cast<T>(0))
+		throw std::invalid_argument("Step cannot be zero in arange.");
+
+	if ((step > static_cast<T>(0) && start >= stop) || (step < static_cast<T>(0) && start <= stop))
+		return Tensor<T>({0}); // Return an empty 1D tensor
+	
+	std::vector<T> data_vector;
+	for (T val = start; (step > static_cast<T>(0) ? (val < stop) : (val > stop)); val += step)
+		data_vector.push_back(val);
+
+	return Tensor<T>({data_vector.size()}, data_vector);
+}
+
+/**
+ * @brief Creates a 1D tensor with `num_points` evenly spaced samples,
+ *        calculated over the interval [start, end] (inclusive).
+ *        Similar to NumPy's linspace.
+ *
+ * @tparam T The data type of the tensor elements. Must be floating point.
+ * @param start The starting value of the sequence.
+ * @param end The end value of the sequence.
+ * @param num_points The number of samples to generate. Must be non-negative.
+ * @return A new 1D Tensor<T> containing the generated sequence.
+ * @throw std::invalid_argument if num_points is 0.
+ */
+template <typename T>
+Tensor<T> linspace(T start, T end, size_t num_points)
+{
+	static_assert(std::is_arithmetic_v<T>, "Tensor type for 'linspace' must be arithmetic.");
+
+	if (num_points == 0)
+		throw std::invalid_argument("Number of points must be non-zero in linspace");
+
+	typename Tensor<T>::shape_type shape = {num_points};
+	std::vector<T> data_vector;
+	data_vector.reserve(num_points);
+
+	if (num_points == 1)
+		data_vector.push_back(start);
+	else
+	{
+		T step_size = (end - start) / static_cast<T>(num_points - 1);
+		for (size_t i = 0; i < num_points; i++)
+			data_vector.push_back(start + static_cast<T>(i) * step_size);
+	}
+
+	return Tensor<T>(shape, data_vector);
+}
 
 } // namespace core
 } // namespace mlib

@@ -505,11 +505,27 @@ auto Tensor<T>::operator()(OperatorArgs... args) const -> std::conditional_t<std
 
 // 12. RAW DATA ACCESS (NON-CONST)
 template <typename T>
-T *Tensor<T>::data() { return _data.data(); }
+T *Tensor<T>::data()
+{
+	if constexpr (std::is_same_v<T, bool>)
+		throw std::runtime_error("Direct data() pointer access is not supported for Tensor<bool>. Use operator() or at().");
+
+	if (is_empty() && !is_scalar()) return nullptr;
+
+	return _data.data();
+}
 
 // 13. RAW DATA ACCESS (CONST)
 template <typename T>
-const T *Tensor<T>::data() const { return _data.data(); }
+const T *Tensor<T>::data() const
+{
+	if constexpr (std::is_same_v<T, bool>)
+		throw std::runtime_error("Direct data() pointer access is not supported for Tensor<bool>. Use operator() or at().");
+
+	if (is_empty() && !is_scalar()) return nullptr;
+
+	return _data.data();
+}
 
 // 14. RAW DATA VECTOR (CONST)
 template <typename T>

@@ -42,7 +42,9 @@ mlib is in its early stages of development, with significant progress on its cor
   - Basic constructors (shape-based, data-based, fill-value).
   - Element access via `at()` and variadic `operator()`.
   - Correct copy and move semantics.
-  - Reshaping capabilities (maintains total size).
+  - Reshaping capabilities, including inference of one dimension (`-1` support).
+  - `squeeze()`: Removes dimensions of size 1 (removes all or specific axis).
+  - `unsqueeze()`: Inserts a new dimension of size 1 at a specified axis.
   - Contiguous data handling.
   - Stream insertion (`operator<<`) for easy printing.
 - **Extensive Element-wise Arithmetic Operations**:
@@ -55,6 +57,9 @@ mlib is in its early stages of development, with significant progress on its cor
   - Equality (`==`), Inequality (`!=`), Greater (`>`), Less (`<`), Greater Equal (`>=`), Less Equal (`<=`).
   - Results in `Tensor<bool>` (boolean masks).
   - Supports Tensor-Tensor and Tensor-Scalar comparisons.
+- **Element-wise Logical Operations**:
+  - `logical_and()`, `logical_or()`, `logical_not()` (`operator!`).
+  - Operates on `Tensor<bool>` inputs, returns `Tensor<bool>`.
 - **Comprehensive Matrix Multiplication (`matmul`)**:
   - Performs `matmul` for 2D matrices (`(m,k) @ (k,n)` -> `(m,n)`).
   - Automatically handles common vector-matrix interactions:
@@ -82,8 +87,8 @@ mlib is in its early stages of development, with significant progress on its cor
 
 - Advanced indexing/slicing is not yet implemented (requires views).
 - More complex linear algebra (e.g., QR decomposition, SVD) is not available.
-- Autograd and neural network layers are under development.
-- Limited optimization for large-scale tensors (e.g., no GPU support, SIMD).
+- Automatic differentiation engine (autograd) is under development.
+- Limited optimization for large-scale tensors (e.g., no GPU support, SIMD acceleration).
 
 ## Getting Started
 
@@ -168,11 +173,34 @@ mlib::core::Tensor<int> range_tensor = mlib::core::arange<int>(0, 5, 1); // 0, 1
 mlib::core::Tensor<float> linspace_tensor = mlib::core::linspace<float>(0.0f, 1.0f, 5); // 0.0, 0.25, 0.5, 0.75, 1.0
 // Tensor(shape: {5}, strides: {1}, total_size: 5, data: [0, 0.25, 0.5, 0.75, 1])
 
+// Tensor Shape Transformations
+mlib::core::Tensor<float> unsqueezed_tensor = mlib::core::unsqueeze(A, 0); // Add a dim at axis 0
+// Tensor(shape: {1, 2, 3}, strides: {6, 3, 1}, total_size: 6, data: [
+//   [
+//     [1, 2, 3]
+//     [4, 5, 6]
+//   ]
+// ])
+
+mlib::core::Tensor<float> squeezed_tensor = mlib::core::squeeze(unsqueezed_tensor, 0); // Remove the dim at axis 0=
+// Tensor(shape: {2, 3}, strides: {3, 1}, total_size: 6, data: [
+//     [1, 2, 3]
+//     [4, 5, 6]
+// ])
+
 // Element-wise addition
 mlib::core::Tensor<float> C = A + B;
 // Tensor(shape: {2, 3}, strides: {3, 1}, total_size: 6, data: [
 //     [8, 10, 12]
 //     [14, 16, 18]
+// ])
+
+// Element-wise logical NOT
+mlib::core::Tensor<bool> bool_tensor_a = mlib::core::Tensor<bool>({2,2}, {true, false, true, false});
+mlib::core::Tensor<bool> not_a = !bool_tensor_a;
+// Tensor(shape: {2, 2}, strides: {2, 1}, total_size: 4, data: [
+//   [false, true]
+//   [false, true]
 // ])
 
 // Tensor-scalar multiplication

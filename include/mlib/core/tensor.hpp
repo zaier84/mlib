@@ -24,6 +24,7 @@ public:
     using shape_type = std::vector<size_t>;
     using strides_type = std::vector<size_t>;
     using data_type = std::vector<T>;
+	using shape_type_allow_inference = std::vector<long long>;
 
     // Constructors and Destructor
     Tensor();
@@ -67,7 +68,7 @@ public:
 
     // Modifiers
     void fill(T value);
-    void reshape(const shape_type &new_shape);
+    void reshape(const shape_type_allow_inference &new_shape);
 
     // Utility
     void print(std::ostream &os = std::cout) const;
@@ -539,42 +540,79 @@ template <typename T> void Tensor<T>::fill(T value)
 }
 
 // 2. RESHAPE METHOD - Changes tensor dimensions while preserving data
-template <typename T> void Tensor<T>::reshape(const shape_type &new_shape)
+template <typename T> void Tensor<T>::reshape(const shape_type_allow_inference &new_shape_raw)
 {
-    size_t new_total_size = 1;
-    if (new_shape.empty())
-    {
-        new_total_size = 0;
-        if (_total_size == 1 && new_shape.empty())
-        {
-        }
-        else
-            new_total_size = 0;
-    }
-    else
-    {
-        for (size_t dim_size : new_shape)
-        {
-            if (dim_size == 0)
-            {
-                new_total_size = 0;
-                break;
-            }
-            new_total_size *= dim_size;
-        }
-    }
+	long long inferred_dim_idx = -1;
+	long long product_of_known_dims = 1;
 
-    if (new_total_size != _total_size && !(_total_size == 1 && new_shape.empty() && new_total_size == 0))
-    {
-        if (new_shape.empty() && _total_size == 1)
-        {
-        }
-        else if (new_total_size != _total_size)
-            throw std::invalid_argument("New shape total size must match current total size of reshape.");
-    }
+	for (size_t d = 0; d < new_shape_raw.size(); d++)
+	{
+		long long dim_size = new_shape_raw[d];
+		if (dim_size == -1)
+		{
+			if (inferred_dim_idx != -1)
+				throw std::invalid_argument("Only one dimension can be inferred (-1) in reshape.");
 
-    _shape = new_shape;
-    calculate_strides();
+			inferred_dim_idx = static_cast<long long>(d);
+		}
+		else if (dim_size < 0)
+			throw std::invalid_argument("Reshape dimensions cannot be negative (except -1 for inference).");
+		else if (dim_size == 0)
+			product_of_known_dims *= dim_size;
+		else
+			product_of_known_dims *= dim_size;
+	}
+
+	long long inferred_dim_actual_size = 0;
+	long long final_new_total_size = 0;
+
+	if (inferred_dim_idx != -1)
+	{
+		if (product_of_known_dims == 0)
+		{
+			if (_total_size != 0)
+				throw std::invalid_argument("Cannot reshape a non-zero sized tensor into a shape containing a zero-sized dimension while inferring another dimension unless the entire reshaped tensor's size is 0 (i.e. target shape would have zero elements).");
+
+			inferred_dim_actual_size = 0;
+		}
+		else
+		{
+			if (_total_size % product_of_known_dims != 0)
+			{
+				throw std::invalid_argument("Total size (" + std::to_string(_total_size) +
+					") not perfectly divisible by product of known dimensions (" +
+					std::to_string(product_of_known_dims) + ") for reshape inference.");
+			}
+			inferred_dim_actual_size = static_cast<long long>(_total_size / product_of_known_dims);
+		}
+		final_new_total_size = inferred_dim_actual_size * product_of_known_dims;
+	}
+	else
+		final_new_total_size = product_of_known_dims;
+
+	if (_total_size == 0)
+	{
+		if (final_new_total_size != 0)
+			throw std::invalid_argument("Cannot reshape a 0-element tensor to a non-0-element tensor. New shape implies " + std::to_string(final_new_total_size) + " elements.");
+	}
+	else if (_total_size != final_new_total_size)
+	{
+		throw std::invalid_argument(
+        "New shape total size (" + std::to_string(final_new_total_size) +
+        ") must match current total size (" + std::to_string(_total_size) + ") for reshape.");
+	}
+
+	_shape.clear();
+	_shape.reserve(new_shape_raw.size());
+	for (size_t d = 0; d < new_shape_raw.size(); d++)
+	{
+		if (static_cast<long long>(d) == inferred_dim_idx)
+			_shape.push_back(static_cast<size_t>(inferred_dim_actual_size)); // push calculated inferred size
+		else
+			_shape.push_back(static_cast<size_t>(new_shape_raw[d])); // Push known dim (cast from long long)
+	}
+
+	calculate_strides(); // Recalculate strides for the new shape
 }
 
 // Utility Implementations

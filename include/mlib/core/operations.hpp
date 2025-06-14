@@ -2294,6 +2294,240 @@ Tensor<T> linspace(T start, T end, size_t num_points)
 	return Tensor<T>(shape, data_vector);
 }
 
+/**
+ * @brief Inserts a new dimension of size 1 at the specified axis.
+ *        This operation typically returns a view, but in this copying
+ *        implementation, it creates a copy of the tensor's data.
+ *
+ * @tparam T The data type of the tensor elements.
+ * @param tensor The input tensor.
+ * @param axis The position where the new dimension should be inserted. Can be negative.
+ *             (e.g., -1 for last position, 0 for first).
+ * @return A new Tensor<T> with an additional dimension.
+ * @throw DimensionError if axis is out of bounds (should be -ndim -1 to ndim inclusive).
+ */
+template <typename T>
+Tensor<T> unsqueeze(const Tensor<T>& tensor, int axis)
+{
+	int ndim = static_cast<int>(tensor.ndim());
+	if (axis < 0)
+		axis = ndim + axis + 1;
+
+	if (axis < 0 || axis > ndim)
+		throw DimensionError("Axis " + std::to_string(axis) + " is out of bounds for unsqueeze with " + std::to_string(ndim) + " dimensions.");
+
+	typename Tensor<T>::shape_type new_shape = tensor.get_shape();
+	new_shape.insert(new_shape.begin() + axis, 1);
+
+	std::vector<T> copied_data(tensor.data(), tensor.data() + tensor.get_total_size());
+	return Tensor<T>(new_shape, copied_data);
+}
+
+/**
+ * @brief Removes dimensions of size 1 from the tensor.
+ *        If no axis is specified, all dimensions of size 1 are removed.
+ *        This operation typically returns a view, but in this copying
+ *        implementation, it creates a copy of the tensor's data.
+ *
+ * @tparam T The data type of the tensor elements.
+ * @param tensor The input tensor.
+ * @param axis The dimension to remove. If -1, all dimensions of size 1 are removed. Can be negative.
+ *             (e.g., -1 to remove all, -2 for second to last dim).
+ * @return A new Tensor<T> with reduced dimensions.
+ * @throw DimensionError if axis is specified but is out of bounds, or the dimension is not size 1.
+ */
+template <typename T>
+Tensor<T> squeeze(const Tensor<T>& tensor, int axis_raw = -1) {
+    int ndim = static_cast<int>(tensor.ndim()); // Number of dimensions of the input tensor
+
+    // --- Step 1: Normalize axis & Perform Initial Input Validation (pre-new_shape checks) ---
+
+    // A. Handling 0-dimensional (scalar) tensors.
+    // Test #129 expects this to throw.
+    if (ndim == 0) { // Input is a 0-dimensional tensor (e.g., Tensor({}) or Tensor() )
+        throw DimensionError("Cannot squeeze a 0-dimensional tensor as it has no dimensions to remove.");
+    }
+
+    // B. Normalize `axis_raw` to `normalized_axis` (0 to ndim-1, or -1 for 'all')
+    int normalized_axis = axis_raw;
+    if (axis_raw < 0 && axis_raw != -1) { // Normalize only if negative and not '-1' (which is special)
+        normalized_axis = ndim + axis_raw;
+    }
+    // `is_specific_axis_requested` means axis_raw != -1 (i.e. not squeeze all).
+    bool is_specific_axis_requested = (axis_raw != -1);
+
+
+    // C. Validate specific axis index if `axis_raw` is not -1 ('all')
+    if (is_specific_axis_requested && (normalized_axis < 0 || normalized_axis >= ndim)) {
+        throw DimensionError("Axis " + std::to_string(axis_raw) + " is out of bounds for tensor with " + std::to_string(ndim) + " dimensions.");
+    }
+    // D. Validate that the specified axis (if specific) has size 1 (required for squeezing)
+    if (is_specific_axis_requested && tensor.get_shape()[normalized_axis] != 1) {
+        throw DimensionError("Cannot squeeze dimension " + std::to_string(axis_raw) + ": its size (" + std::to_string(tensor.get_shape()[normalized_axis]) + ") is not 1.");
+    }
+
+
+    // --- Step 2: Determine `new_shape` ---
+    typename Tensor<T>::shape_type new_shape;
+    new_shape.reserve(ndim); // Capacity won't exceed original ndim.
+
+    // Iterate through original dimensions to build `new_shape`
+    for (size_t d = 0; d < ndim; ++d) {
+        bool should_squeeze_this_dim = false; // Flag: `true` if current dimension `d` should be removed
+
+        if (tensor.get_shape()[d] == 1) { // This dimension `d` has size 1 (candidate for squeezing)
+            if (is_specific_axis_requested) { // If a specific axis was requested (`axis_raw` is not -1)
+                if (static_cast<int>(d) == normalized_axis) { // And `d` is that exact axis
+                    should_squeeze_this_dim = true; // Squeeze it
+                }
+            } else { // `axis_raw == -1` (squeeze ALL unit dimensions)
+                should_squeeze_this_dim = true; // Squeeze this unit dimension `d`
+            }
+        }
+        
+        // If current dimension `d` should NOT be squeezed, add it to `new_shape`
+        if (!should_squeeze_this_dim) {
+            new_shape.push_back(tensor.get_shape()[d]);
+        }
+    }
+
+
+    // --- Step 3: Return Resulting Tensor (based on `new_shape` and original `total_size`) ---
+
+    // Calculate the total number of elements implied by the `new_shape`.
+    size_t implied_total_size_from_new_shape = calculate_total_size_from_shape(new_shape);
+
+
+    // Case 3.1: Result has 0 elements.
+    // This happens if original total_size was 0, or a dimension in `new_shape` implicitly means 0 elements.
+    if (implied_total_size_from_new_shape == 0) {
+        // If the resulting `new_shape` is empty `{}`, but implies 0 elements:
+        // Then return a default-constructed `Tensor<T>()` (which is `ndim=0, total_size=0`).
+        if (new_shape.empty()) { // E.g., `Tensor({0})` squeezed -> `new_shape` is `{}` here
+            return Tensor<T>(); // This makes `total_size=0, ndim=0`.
+        }
+        // Otherwise, return `Tensor(new_shape)` for shaped empty tensors like `{2,0}`.
+        // Tensor(shape) constructor correctly produces `_data` as an empty `std::vector` (total_size=0).
+        return Tensor<T>(new_shape); 
+    }
+
+    // Case 3.2: Result is a non-empty scalar (ndim=0, total_size=1) from squeezing a multi-dim unit tensor.
+    // This happens if `new_shape` is empty `{}`, AND the input tensor `total_size` was `1`.
+    // e.g., `Tensor({1,1,1}, {value})` squeezed -> `new_shape` becomes `{}`, `total_size` is `1`.
+    if (new_shape.empty()) { // new_shape is empty `{}` means it should be a scalar
+        // It should match with current `implied_total_size_from_new_shape` which is already 1 here.
+        // It implies original `total_size` must be 1 (checked here from overall logic above that if total_size 0 it exited above).
+        return Tensor<T>({}, tensor.data()[0]); // Copy of the single element's value, makes a true scalar.
+    }
+    
+    // Case 3.3: General result - new_shape implies `total_size > 0` AND is not a scalar.
+    // Create new Tensor by copying original data.
+    // This relies on `tensor.data()` and `get_total_size()` for non-empty tensors returning valid data pointers.
+    return Tensor<T>(new_shape, std::vector<T>(tensor.data(), tensor.data() + tensor.get_total_size()));
+}
+
+/**
+ * @brief Performs element-wise logical AND operation on two boolean tensors.
+ *
+ * @tparam T The type of the tensors' elements (must be bool).
+ * @param a The first boolean tensor.
+ * @param b The second boolean tensor.
+ * @return A Tensor<bool> with element-wise (a_i AND b_i) results.
+ * @throw static_assert if T is not bool.
+ * @throw ShapeMismatchError if shapes of a and b are not identical.
+ */
+template <typename T>
+Tensor<bool> logical_and(const Tensor<T>& a, const Tensor<T>& b)
+{
+	static_assert(std::is_same_v<T, bool>, "Logical AND operation requires boolean tensors.");
+	if (a.get_shape() != b.get_shape())
+		throw ShapeMismatchError("logical_and");
+	if (a.is_empty() && !a.is_scalar())
+		return Tensor<bool>(a.get_shape());
+	if (a.is_scalar())
+		return Tensor<bool>({}, a() && b());
+
+	std::vector<bool> result_data;
+	result_data.reserve(a.get_total_size());
+	for (size_t i = 0; i < a.get_total_size(); i++)
+	{
+		std::vector<size_t> current_indices = get_multi_dim_indices(i, a);
+		result_data.push_back(static_cast<bool>(a.at(current_indices) && b.at(current_indices)));
+	}
+
+	return Tensor<bool>(a.get_shape(), result_data);
+}
+
+/**
+ * @brief Performs element-wise logical OR operation on two boolean tensors.
+ *
+ * @tparam T The type of the tensors' elements (must be bool).
+ * @param a The first boolean tensor.
+ * @param b The second boolean tensor.
+ * @return A Tensor<bool> with element-wise (a_i OR b_i) results.
+ * @throw static_assert if T is not bool.
+ * @throw ShapeMismatchError if shapes of a and b are not identical.
+ */
+template <typename T>
+Tensor<bool> logical_or(const Tensor<T>& a, const Tensor<T>& b)
+{
+	static_assert(std::is_same_v<T, bool>, "Logical OR operation requires boolean tensors.");
+	if (a.get_shape() != b.get_shape())
+		throw ShapeMismatchError("logical_or");
+	if (a.is_empty() && !a.is_scalar())
+		return Tensor<bool>(a.get_shape());
+	if (a.is_scalar())
+		return Tensor<bool>({}, a() || b());
+
+	std::vector<bool> result_data;
+	result_data.reserve(a.get_total_size());
+	for (size_t i = 0; i < a.get_total_size(); i++)
+	{
+		std::vector<size_t> current_indices = get_multi_dim_indices(i, a);
+		result_data.push_back(static_cast<bool>(a.at(current_indices) || b.at(current_indices)));
+	}
+
+	return Tensor<bool>(a.get_shape(), result_data);
+}
+
+/**
+ * @brief Performs element-wise logical NOT operation on a boolean tensor.
+ *
+ * @tparam T The type of the tensor's elements (must be bool).
+ * @param tensor The boolean tensor.
+ * @return A Tensor<bool> with element-wise (NOT tensor_i) results.
+ * @throw static_assert if T is not bool.
+ */
+template <typename T>
+Tensor<bool> logical_not(const Tensor<T>& tensor)
+{
+	static_assert(std::is_same_v<T, bool>, "Logical NOT operation requires boolean tensors.");
+	if (tensor.is_empty() && !tensor.is_scalar())
+		return Tensor<bool>(tensor.get_shape());
+	if (tensor.is_scalar())
+		return Tensor<bool>({}, !tensor());
+
+	std::vector<bool> result_data;
+	result_data.reserve(tensor.get_total_size());
+	for (size_t i = 0; i < tensor.get_total_size(); i++)
+	{
+		std::vector<size_t> current_indices = get_multi_dim_indices(i, tensor);
+		result_data.push_back(static_cast<bool>(!tensor.at(current_indices)));
+	}
+
+	return Tensor<bool>(tensor.get_shape(), result_data);
+}
+
+// Define operator! for Tensor<bool> only
+template <typename T>
+Tensor<bool> operator!(const Tensor<T>& tensor)
+{
+	static_assert(std::is_same_v<T, bool>, "Operator! requires a boolean tensor.");
+	return logical_not(tensor);
+}
+
+
+
 } // namespace core
 } // namespace mlib
 

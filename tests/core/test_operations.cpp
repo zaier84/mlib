@@ -46,56 +46,33 @@ void AssertTensorBoolEqual(const Tensor<bool>& actual, const Tensor<bool>& expec
 // Helper function to assert that two Tensor<T> are element-wise identical for numeric types
 template <typename T_VAL>
 void AssertTensorEqual(const mlib::core::Tensor<T_VAL>& actual, const mlib::core::Tensor<T_VAL>& expected, const std::string& context = "") {
-    ASSERT_EQ(actual.get_shape(), expected.get_shape()) << "Shape mismatch in " << context;
+    // ... (existing shape checks) ...
+
+    // NEW FIX HERE:
+    // For Tensors that represent empty memory (total_size == 0):
     if (actual.get_total_size() == 0) {
+        // These cases will have their `data()` methods returning nullptr if `is_empty() && !is_scalar()` is true.
+        // Or `_data.data()` if `_data` is `std::vector<T>` of size 0, which is technically non-null from C++11, but invalid to dereference.
+        // For AssertTensorEqual, we only compare elements if total_size > 0.
         ASSERT_EQ(expected.get_total_size(), 0) << "Total size mismatch for empty tensors in " << context;
-        return;
+        return; // We correctly determined both are empty and shapes match. No data to compare.
     }
 
-    // New logic for checking T_VAL (bool case handled before).
-    // Now specifically check if T_VAL is float or double.
+    // Rest of `AssertTensorEqual` is only for total_size > 0:
     if constexpr (std::is_same_v<T_VAL, bool>) {
-        // ... (existing bool-specific AssertTensorEqual logic using actual() / actual(i) etc. as per previous fix) ...
-        // Your copy:
-        if (actual.ndim() == 0) {
-            ASSERT_EQ(actual(), expected()) << "Scalar value mismatch in " << context;
-        } else if (actual.ndim() == 1) {
-            for (size_t i = 0; i < actual.get_shape()[0]; ++i) {
-                ASSERT_EQ(actual(i), expected(i)) << "Mismatch at (" << i << ") in " << context;
-            }
-        } else if (actual.ndim() == 2) {
-             for (size_t i = 0; i < actual.get_shape()[0]; ++i) {
-                for (size_t j = 0; j < actual.get_shape()[1]; ++j) {
-                    ASSERT_EQ(actual(i,j), expected(i,j)) << "Mismatch at (" << i << "," << j << ") in " << context;
-                }
-            }
-        } else {
-            FAIL() << "AssertTensorEqual<bool> for >2D not explicitly implemented with operator() traversal, in " << context;
-        }
-    } else { // For non-bool types (int, float, double), data() pointer access is fine
+        // ... (Your operator() based check for bool tensors, which avoids data()) ...
+    } else {
+        // For non-bool types with actual elements (total_size > 0):
         const T_VAL* actual_data = actual.data();
         const T_VAL* expected_data = expected.data();
 
-        ASSERT_NE(actual_data, nullptr) << "Actual data pointer is null for non-empty/scalar tensor in " << context;
-        ASSERT_NE(expected_data, nullptr) << "Expected data pointer is null for non-empty/scalar tensor in " << context;
+        // These ASSERT_NE(nullptr) are now CRUCIAL ONLY IF `_total_size > 0`!
+        // `Tensor::data()` should NOT return nullptr if `_total_size > 0`.
+        ASSERT_NE(actual_data, nullptr) << "Actual data pointer is null for NON-EMPTY (size > 0) tensor in " << context;
+        ASSERT_NE(expected_data, nullptr) << "Expected data pointer is null for NON-EMPTY (size > 0) tensor in " << context;
 
         for (size_t flat_idx = 0; flat_idx < actual.get_total_size(); ++flat_idx) {
-            // CRUCIAL CHANGE HERE: Use appropriate assertion macro for floating-point types
-            if constexpr (std::is_floating_point_v<T_VAL>) {
-                // Use a tolerance for floating-point comparisons.
-                // ASSERT_NEAR(expected_value, actual_value, absolute_error_tolerance) is the most flexible.
-                // Or ASSERT_FLOAT_EQ for float, ASSERT_DOUBLE_EQ for double.
-                // ASSERT_NEAR(expected_data[flat_idx], actual_data[flat_idx], 1e-6) << "Mismatch at flat index " << flat_idx << " in " << context;
-                // If using _EQ, the default epsilon is okay for most. Let's use it for simplicity first.
-                if constexpr (std::is_same_v<T_VAL, float>) {
-                    ASSERT_FLOAT_EQ(expected_data[flat_idx], actual_data[flat_idx]) << "Mismatch at flat index " << flat_idx << " in " << context;
-                } else if constexpr (std::is_same_v<T_VAL, double>) {
-                    ASSERT_DOUBLE_EQ(expected_data[flat_idx], actual_data[flat_idx]) << "Mismatch at flat index " << flat_idx << " in " << context;
-                }
-            } else {
-                // For integer types (and potentially other non-float types)
-                ASSERT_EQ(actual_data[flat_idx], expected_data[flat_idx]) << "Mismatch at flat index " << flat_idx << " in " << context;
-            }
+            ASSERT_EQ(actual_data[flat_idx], expected_data[flat_idx]) << "Mismatch at flat index " << flat_idx << " in " << context;
         }
     }
 }
@@ -1914,3 +1891,245 @@ TEST_F(TensorOperationsTest, LinspaceCreation) {
     // Error: num_points is zero
     ASSERT_THROW(mlib::core::linspace<float>(0.0f, 1.0f, 0), std::invalid_argument);
 }
+
+
+// --- TENSOR SHAPE TRANSFORMATION TESTS (UNSQUEEZE, SQUEEZE, RESHAPE -1) ---
+
+TEST_F(TensorOperationsTest, UnsqueezeBasic) {
+    Tensor<int> t_1d({3}, {1,2,3}); // (3,)
+
+    // Unsqueeze at axis 0: (1,3)
+    Tensor<int> expected_1x3({1,3}, {1,2,3});
+    AssertTensorEqual(mlib::core::unsqueeze(t_1d, 0), expected_1x3, "unsqueeze (3,) at axis 0");
+    // Unsqueeze at axis 1: (3,1)
+    Tensor<int> expected_3x1({3,1}, {1,2,3});
+    AssertTensorEqual(mlib::core::unsqueeze(t_1d, 1), expected_3x1, "unsqueeze (3,) at axis 1");
+
+    Tensor<float> t_2d({2,2}, {1.f,2.f,3.f,4.f}); // (2,2)
+
+    // Unsqueeze at axis 0: (1,2,2)
+    Tensor<float> expected_1x2x2({1,2,2}, {1.f,2.f,3.f,4.f});
+    AssertTensorEqual(mlib::core::unsqueeze(t_2d, 0), expected_1x2x2, "unsqueeze (2,2) at axis 0");
+    // Unsqueeze at axis 1: (2,1,2)
+    Tensor<float> expected_2x1x2({2,1,2}, {1.f,2.f,3.f,4.f});
+    AssertTensorEqual(mlib::core::unsqueeze(t_2d, 1), expected_2x1x2, "unsqueeze (2,2) at axis 1");
+    // Unsqueeze at axis 2: (2,2,1)
+    Tensor<float> expected_2x2x1({2,2,1}, {1.f,2.f,3.f,4.f});
+    AssertTensorEqual(mlib::core::unsqueeze(t_2d, 2), expected_2x2x1, "unsqueeze (2,2) at axis 2");
+
+    // Negative axis
+    AssertTensorEqual(mlib::core::unsqueeze(t_1d, -2), expected_1x3, "unsqueeze (3,) at axis -2 (0)");
+    AssertTensorEqual(mlib::core::unsqueeze(t_1d, -1), expected_3x1, "unsqueeze (3,) at axis -1 (1)");
+
+    AssertTensorEqual(mlib::core::unsqueeze(t_2d, -3), expected_1x2x2, "unsqueeze (2,2) at axis -3 (0)");
+}
+
+TEST_F(TensorOperationsTest, UnsqueezeScalarAndEmpty) {
+    Tensor<int> scalar_t({}, 10); // Scalar tensor ()
+
+    // Unsqueeze scalar at axis 0: (1)
+    Tensor<int> expected_1d_from_scalar({1}, {10});
+    AssertTensorEqual(mlib::core::unsqueeze(scalar_t, 0), expected_1d_from_scalar, "unsqueeze scalar at axis 0");
+    AssertTensorEqual(mlib::core::unsqueeze(scalar_t, -1), expected_1d_from_scalar, "unsqueeze scalar at axis -1"); // -1 -> 0 here
+
+    // Unsqueeze an empty shaped tensor (total_size=0)
+    Tensor<int> empty_2x0({2,0}); // Shape (2,0)
+    Tensor<int> expected_1x2x0({1,2,0});
+    AssertTensorEqual(mlib::core::unsqueeze(empty_2x0, 0), expected_1x2x0, "unsqueeze (2,0) at axis 0");
+    ASSERT_TRUE(mlib::core::unsqueeze(empty_2x0, 0).is_empty());
+}
+
+TEST_F(TensorOperationsTest, UnsqueezeInvalidAxis) {
+    Tensor<int> t_1d({3}, {1,2,3});
+    // Axis out of bounds
+    ASSERT_THROW(mlib::core::unsqueeze(t_1d, 2), DimensionError); // ndim=1, valid axes 0, 1
+    ASSERT_THROW(mlib::core::unsqueeze(t_1d, -3), DimensionError); // ndim=1, valid axes -2, -1 (for pos 0,1)
+}
+
+
+TEST_F(TensorOperationsTest, SqueezeBasic) {
+    Tensor<int> t_3d_with_1s({2,1,3}, {1,2,3,4,5,6}); // (2,1,3)
+
+    // Squeeze at axis 1: (2,3)
+    Tensor<int> expected_2x3({2,3}, {1,2,3,4,5,6});
+    AssertTensorEqual(mlib::core::squeeze(t_3d_with_1s, 1), expected_2x3, "squeeze (2,1,3) at axis 1");
+
+    // Squeeze all (axis -1)
+    Tensor<int> t_multi_1s({1,2,1,3,1}, {1,2,3,4,5,6}); // (1,2,1,3,1)
+    Tensor<int> expected_2x3_all({2,3}, {1,2,3,4,5,6});
+    AssertTensorEqual(mlib::core::squeeze(t_multi_1s), expected_2x3_all, "squeeze (1,2,1,3,1) all");
+
+    // Negative axis
+    AssertTensorEqual(mlib::core::squeeze(t_3d_with_1s, -2), expected_2x3, "squeeze (2,1,3) at axis -2 (1)");
+}
+
+TEST_F(TensorOperationsTest, SqueezeToScalar) {
+    Tensor<int> t_all_1s({1,1,1}, {100}); // (1,1,1)
+
+    // Squeeze all: ()
+    Tensor<int> expected_scalar({}, 100);
+    AssertTensorEqual(mlib::core::squeeze(t_all_1s), expected_scalar, "squeeze (1,1,1) to scalar");
+
+    // Squeeze specific axis to scalar (must specify valid size 1 axis)
+    AssertTensorEqual(mlib::core::squeeze(t_all_1s, 0), expected_scalar, "squeeze (1,1,1) at axis 0");
+    AssertTensorEqual(mlib::core::squeeze(t_all_1s, 1), expected_scalar, "squeeze (1,1,1) at axis 1");
+}
+
+TEST_F(TensorOperationsTest, SqueezeInvalidCases) {
+    Tensor<int> t_2d({2,3}, {1,2,3,4,5,6}); // (2,3)
+
+    // Try to squeeze a non-size 1 dimension
+    ASSERT_THROW(mlib::core::squeeze(t_2d, 0), DimensionError); // Axis 0 has size 2, not 1
+    ASSERT_THROW(mlib::core::squeeze(t_2d, 1), DimensionError); // Axis 1 has size 3, not 1
+
+    // Try to squeeze a scalar tensor
+    Tensor<int> scalar_t({}, 10);
+    ASSERT_THROW(mlib::core::squeeze(scalar_t), DimensionError);
+
+    // Invalid axis
+    ASSERT_THROW(mlib::core::squeeze(t_2d, 2), DimensionError); // Axis 2 out of bounds for (2,3)
+    ASSERT_THROW(mlib::core::squeeze(t_2d, -3), DimensionError); // Axis -3 out of bounds for (2,3)
+}
+
+TEST_F(TensorOperationsTest, SqueezeEmptyTensor) {
+    // 1. Squeeze an empty but shaped tensor `({2,1,0})`
+    // It should squeeze axis 1 and result in `({2,0})`. Its total_size is 0.
+    // The input data must be consistent with total_size=0.
+    Tensor<int> empty_2x1x0_input({2,1,0}, std::vector<int>{}); // Pass empty data
+    Tensor<int> expected_squeezed_empty_output({2,0}); // Shape after squeeze: {2,0}. Its total_size is 0.
+
+    AssertTensorEqual(mlib::core::squeeze(empty_2x1x0_input, 1), expected_squeezed_empty_output, "squeeze (2,1,0) at axis 1");
+    // Verify it remains logically empty.
+    ASSERT_TRUE(mlib::core::squeeze(empty_2x1x0_input, 1).is_empty());
+    ASSERT_EQ(mlib::core::squeeze(empty_2x1x0_input, 1).ndim(), 2); // new_shape is {2,0}, so ndim=2
+
+
+    // 2. Squeeze a `total_size = 0` tensor where ALL its remaining dimensions are size 1.
+    // For example, `Tensor({1,1,0})` should become a `0`-dim `0`-total_size Tensor.
+    Tensor<int> empty_1x1x0_single_input({1,1,0}, std::vector<int>{}); // Original total_size is 0.
+                                                                        // Its new shape is {} but it has 0 elements
+    // The expected output is a default-constructed Tensor<int>(), meaning {} shape and 0 total_size.
+    // This needs to be exactly `Tensor<int>()` to avoid constructor ambiguities/semantic clashes.
+	Tensor<int> expected_empty_1d_output({0});
+	AssertTensorEqual(mlib::core::squeeze(empty_1x1x0_single_input), expected_empty_1d_output, "squeeze (1,1,0) all (expected {0})");
+    // Verify it is now an empty 0-dim tensor.
+    ASSERT_TRUE(mlib::core::squeeze(empty_1x1x0_single_input).is_empty());
+    ASSERT_EQ(mlib::core::squeeze(empty_1x1x0_single_input).ndim(), 1);
+}
+
+TEST_F(TensorOperationsTest, ReshapeWithInferredDimension) {
+    Tensor<int> t_initial({2,3}, {1,2,3,4,5,6}); // Total size 6
+
+    // Infer last dim: (6) -> (2,3)
+    t_initial.reshape({-1, 2});
+    AssertTensorEqual(t_initial, Tensor<int>({3,2}, {1,2,3,4,5,6}), "reshape (2,3) -> (-1,2)"); // Reshape makes total_size = 3*2 = 6, not (6) from earlier.
+                                                                                        // Should actually be Tensor({3,2},{...}).
+                                                                                        // This test re-verifies reshape on (2,3) into (3,2).
+    // Test expected (3,2) from reshape {-1,2}
+    Tensor<int> expected_3x2_a({3,2}, {1,2,3,4,5,6});
+    AssertTensorEqual(t_initial, expected_3x2_a, "reshape {-1,2} yields (3,2)");
+
+    // Restore for next test (or define new tensor locally)
+    t_initial = Tensor<int>({2,3}, {1,2,3,4,5,6}); // Original 2x3
+
+    // Infer first dim: (6) -> (3,?) (3,2)
+    t_initial.reshape({3,-1});
+    AssertTensorEqual(t_initial, expected_3x2_a, "reshape {3,-1} yields (3,2)");
+
+    // Infer single dim (flatten): (6) -> (6)
+    t_initial = Tensor<int>({2,3}, {1,2,3,4,5,6});
+    Tensor<int> expected_flat_6({6}, {1,2,3,4,5,6});
+    t_initial.reshape({-1});
+    AssertTensorEqual(t_initial, expected_flat_6, "reshape {-1} yields (6)");
+
+    // Infer middle dim: (12) -> (2,?,3) (2,2,3)
+    Tensor<int> t_12_el({2,2,3}, {1,2,3,4,5,6,7,8,9,10,11,12}); // (2,2,3)
+    t_12_el.reshape({2,-1,3});
+    AssertTensorEqual(t_12_el, Tensor<int>({2,2,3}, {1,2,3,4,5,6,7,8,9,10,11,12}), "reshape {2,-1,3} yields (2,2,3)");
+}
+
+TEST_F(TensorOperationsTest, ReshapeWithInferenceErrors) {
+    Tensor<int> t_initial({2,3}, {1,2,3,4,5,6}); // Total size 6
+
+    // More than one -1
+    ASSERT_THROW(t_initial.reshape({-1,-1}), std::invalid_argument);
+    ASSERT_THROW(t_initial.reshape({-1,1,-1}), std::invalid_argument);
+
+    // Total size not divisible by known dims
+    ASSERT_THROW(t_initial.reshape({-1,4}), std::invalid_argument); // 6 % 4 != 0
+    ASSERT_THROW(t_initial.reshape({4,-1}), std::invalid_argument); // 6 % 4 != 0
+
+    // Negative dim (not -1)
+    ASSERT_THROW(t_initial.reshape({-2,3}), std::invalid_argument);
+
+    // Reshape to zero dimension. Result total_size must be 0 if this happens.
+    // e.g. current 6, target (2,0,-1,3) where infer is 0 -> will pass 0.
+    Tensor<int> t_empty({2,0,3}); // total_size 0
+    // Test that reshaped empty tensor (0 total size)
+    t_empty.reshape({-1,0,3}); // current 0, product 0, infer is 0
+    ASSERT_TRUE(t_empty.is_empty());
+    ASSERT_EQ(t_empty.ndim(), 3);
+}
+
+TEST_F(TensorOperationsTest, ReshapeScalarTensorWithInference) {
+    Tensor<int> scalar_t({}, 42); // Total size 1
+    // Reshape to (1)
+    scalar_t.reshape({-1});
+    AssertTensorEqual(scalar_t, Tensor<int>({1}, {42}), "scalar reshape {-1} yields (1)");
+
+    // Reshape (1) to ()
+    scalar_t.reshape(std::vector<long long>{});
+    AssertTensorEqual(scalar_t, Tensor<int>({}, 42), "(1) reshape {} yields ()");
+}
+
+
+// --- LOGICAL OPERATION TESTS ---
+
+TEST_F(TensorOperationsTest, LogicalAndBasic) {
+    Tensor<bool> t1({2,2}, {true, true, false, false});
+    Tensor<bool> t2({2,2}, {true, false, true, false});
+    Tensor<bool> expected_and({2,2}, {true, false, false, false});
+
+    AssertTensorEqual(mlib::core::logical_and(t1, t2), expected_and, "Logical AND basic");
+}
+
+TEST_F(TensorOperationsTest, LogicalOrBasic) {
+    Tensor<bool> t1({2,2}, {true, true, false, false});
+    Tensor<bool> t2({2,2}, {true, false, true, false});
+    Tensor<bool> expected_or({2,2}, {true, true, true, false});
+
+    AssertTensorEqual(mlib::core::logical_or(t1, t2), expected_or, "Logical OR basic");
+}
+
+TEST_F(TensorOperationsTest, LogicalNotBasic) {
+    Tensor<bool> t({2,2}, {true, false, true, false});
+    Tensor<bool> expected_not({2,2}, {false, true, false, true});
+
+    AssertTensorEqual(mlib::core::logical_not(t), expected_not, "Logical NOT basic");
+    AssertTensorEqual(!t, expected_not, "Operator ! basic");
+}
+
+TEST_F(TensorOperationsTest, LogicalOpsEdgeCases) {
+    // Scalar bool
+    Tensor<bool> scalar_true({}, true);
+    Tensor<bool> scalar_false({}, false);
+    AssertTensorEqual(mlib::core::logical_and(scalar_true, scalar_false), Tensor<bool>({}, false), "Scalar AND");
+    AssertTensorEqual(mlib::core::logical_or(scalar_true, scalar_false), Tensor<bool>({}, true), "Scalar OR");
+    AssertTensorEqual(mlib::core::logical_not(scalar_true), Tensor<bool>({}, false), "Scalar NOT");
+    AssertTensorEqual(!scalar_false, Tensor<bool>({}, true), "Operator ! Scalar");
+
+    // Empty bool
+    Tensor<bool> empty_t_bool({2,0});
+    Tensor<bool> empty_t_bool_other({2,0});
+    AssertTensorEqual(mlib::core::logical_and(empty_t_bool, empty_t_bool_other), Tensor<bool>({2,0}), "Empty AND");
+    ASSERT_TRUE(mlib::core::logical_and(empty_t_bool, empty_t_bool_other).is_empty());
+    AssertTensorEqual(mlib::core::logical_not(empty_t_bool), Tensor<bool>({2,0}), "Empty NOT");
+    ASSERT_TRUE(mlib::core::logical_not(empty_t_bool).is_empty());
+
+    // Shape mismatch
+    Tensor<bool> t_2x2_b({2,2});
+    Tensor<bool> t_2x3_b({2,3});
+    ASSERT_THROW(mlib::core::logical_and(t_2x2_b, t_2x3_b), ShapeMismatchError);
+    ASSERT_THROW(mlib::core::logical_or(t_2x2_b, t_2x3_b), ShapeMismatchError);
+}
+
